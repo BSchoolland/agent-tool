@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { init } from "./commands/init.js";
+import { start } from "./commands/start.js";
 
 const program = new Command();
 
@@ -17,11 +18,9 @@ program
   .action(init);
 
 program
-  .command("start <count>")
-  .description("Boot N VMs from project snapshot, open tmux session")
-  .action((count: string) => {
-    console.log(`TODO: start ${count} VMs`);
-  });
+  .command("start [count]")
+  .description("Boot N agent VMs (or resume existing ones with no count)")
+  .action(start);
 
 program
   .command("stop")

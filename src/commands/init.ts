@@ -1,32 +1,12 @@
 import chalk from "chalk";
-import { execFileSync } from "node:child_process";
 import { writeFileSync, rmSync } from "node:fs";
-import { resolve, basename, join } from "node:path";
+import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import * as multipass from "../multipass.js";
 import { getBaseCloudInit } from "../cloud-init.js";
+import { getRepoName, projectVMName } from "../project.js";
 
 const BASE_VM_NAME = "agent-tool-base";
-
-function getRepoName(): string {
-  try {
-    const url = execFileSync("git", ["remote", "get-url", "origin"], {
-      encoding: "utf-8",
-    }).trim();
-    return basename(url).replace(/\.git$/, "");
-  } catch {
-    console.error(
-      chalk.red(
-        "Not a git repository or no 'origin' remote found. Run this from a project directory with a git remote."
-      )
-    );
-    process.exit(1);
-  }
-}
-
-function projectVMName(project: string): string {
-  return `agent-tool-project-${project}`;
-}
 
 async function ensureBaseImage(): Promise<void> {
   if (await multipass.exists(BASE_VM_NAME)) {
