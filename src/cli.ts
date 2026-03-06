@@ -13,15 +13,8 @@ program
 
 program
   .command("init")
-  .description("One-time setup: build base VM image with common dev tools")
+  .description("Initialize current project for agent-tool (run from a git repo)")
   .action(init);
-
-program
-  .command("setup <project>")
-  .description("Set up a project inside a VM and snapshot it")
-  .action((project: string) => {
-    console.log(`TODO: setup ${project}`);
-  });
 
 program
   .command("start <count>")

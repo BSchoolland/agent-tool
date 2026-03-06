@@ -78,6 +78,10 @@ export async function runCommand(vmName: string, command: string[]): Promise<Exe
   return exec(["exec", vmName, "--", ...command]);
 }
 
+export async function runInteractive(vmName: string, command: string[]): Promise<void> {
+  await execStreamed(["exec", vmName, "--", ...command]);
+}
+
 export async function list(): Promise<{ name: string; state: string; ipv4: string }[]> {
   const { stdout } = await exec(["list", "--format", "json"]);
   const data = JSON.parse(stdout);
@@ -91,6 +95,29 @@ export async function list(): Promise<{ name: string; state: string; ipv4: strin
 export async function info(name: string): Promise<any> {
   const { stdout } = await exec(["info", name, "--format", "json"]);
   return JSON.parse(stdout);
+}
+
+export async function clone(source: string, name: string): Promise<void> {
+  await exec(["clone", source, "--name", name]);
+}
+
+export async function start(name: string): Promise<void> {
+  await exec(["start", name]);
+}
+
+export async function transfer(source: string, destination: string, recursive = false): Promise<void> {
+  const args = ["transfer"];
+  if (recursive) args.push("--recursive");
+  args.push(source, destination);
+  await execStreamed(args);
+}
+
+export async function shell(name: string): Promise<void> {
+  await execStreamed(["shell", name]);
+}
+
+export async function restore(vmName: string, snapshotName: string): Promise<void> {
+  await exec(["restore", `${vmName}.${snapshotName}`, "--destructive"]);
 }
 
 export async function exists(name: string): Promise<boolean> {

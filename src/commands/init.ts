@@ -1,43 +1,51 @@
 import chalk from "chalk";
+import { execFileSync } from "node:child_process";
 import { writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { resolve, basename, join } from "node:path";
 import { homedir } from "node:os";
 import * as multipass from "../multipass.js";
 import { getBaseCloudInit } from "../cloud-init.js";
 
-const SETUP_VM_NAME = "agent-tool-setup";
+const BASE_VM_NAME = "agent-tool-base";
 
-export async function init(): Promise<void> {
-  console.log(chalk.bold("Initializing agent-tool base image...\n"));
-
-  // 1. Check multipass
-  console.log("Checking Multipass installation...");
+function getRepoName(): string {
   try {
-    await multipass.checkMultipass();
-  } catch (e: any) {
-    console.error(chalk.red(e.message));
-    process.exit(1);
-  }
-  console.log(chalk.green("Multipass is available.\n"));
-
-  // 2. Check if base image already exists
-  if (await multipass.exists(SETUP_VM_NAME)) {
+    const url = execFileSync("git", ["remote", "get-url", "origin"], {
+      encoding: "utf-8",
+    }).trim();
+    return basename(url).replace(/\.git$/, "");
+  } catch {
     console.error(
       chalk.red(
-        `VM "${SETUP_VM_NAME}" already exists. Run "multipass delete --purge ${SETUP_VM_NAME}" first, or it may be from a previous interrupted init.`
+        "Not a git repository or no 'origin' remote found. Run this from a project directory with a git remote."
       )
     );
     process.exit(1);
   }
+}
 
-  // 3. Write cloud-init to home dir (Multipass snap can't access /tmp or dotdirs)
+function projectVMName(project: string): string {
+  return `agent-tool-project-${project}`;
+}
+
+async function ensureBaseImage(): Promise<void> {
+  if (await multipass.exists(BASE_VM_NAME)) {
+    return;
+  }
+
+  console.log(
+    chalk.yellow(
+      "First time setup detected — building base VM image. This takes ~10 minutes but only happens once.\n"
+    )
+  );
+
+  // Write cloud-init to home dir (Multipass snap can't access /tmp or dotdirs)
   const cloudInitPath = join(homedir(), "agent-tool-cloud-init.yaml");
   writeFileSync(cloudInitPath, getBaseCloudInit());
 
-  // 4. Launch VM with cloud-init
-  console.log("Launching setup VM (this will take several minutes)...");
+  console.log("Launching base VM...");
   try {
-    await multipass.launch(SETUP_VM_NAME, {
+    await multipass.launch(BASE_VM_NAME, {
       cloudInit: cloudInitPath,
       memory: "4G",
       disk: "20G",
@@ -50,44 +58,104 @@ export async function init(): Promise<void> {
   rmSync(cloudInitPath);
   console.log(chalk.green("VM launched.\n"));
 
-  // 5. Wait for cloud-init to finish
-  console.log("Waiting for cloud-init to complete (installing dev tools)...");
+  // Wait for cloud-init to finish
+  console.log("Installing dev tools (Node, Bun, Python, Rust, Docker, Claude Code, gh)...");
   try {
-    await multipass.runCommand(SETUP_VM_NAME, [
+    await multipass.runCommand(BASE_VM_NAME, [
       "cloud-init", "status", "--wait",
     ]);
   } catch (e: any) {
-    console.error(chalk.yellow(`cloud-init wait returned an error: ${e.message}`));
+    console.error(
+      chalk.yellow(`cloud-init wait returned an error: ${e.message}`)
+    );
     console.log("Checking if tools were installed anyway...");
   }
 
-  // 6. Verify key tools
+  // Verify key tools
   console.log("\nVerifying installations...");
   const checks = [
-    { name: "node", cmd: ["node", "--version"] },
-    { name: "bun", cmd: ["bash", "-lc", "bun --version"] },
-    { name: "python3", cmd: ["python3", "--version"] },
-    { name: "gh", cmd: ["gh", "--version"] },
-    { name: "docker", cmd: ["docker", "--version"] },
-    { name: "rustc", cmd: ["bash", "-lc", "rustc --version"] },
-    { name: "claude", cmd: ["bash", "-lc", "claude --version"] },
+    { name: "node", cmd: "node --version" },
+    { name: "bun", cmd: "bun --version" },
+    { name: "python3", cmd: "python3 --version" },
+    { name: "gh", cmd: "gh --version" },
+    { name: "docker", cmd: "docker --version" },
+    { name: "rustc", cmd: "rustc --version" },
+    { name: "claude", cmd: "claude --version" },
   ];
 
   for (const check of checks) {
     try {
-      const { stdout } = await multipass.runCommand(SETUP_VM_NAME, check.cmd);
+      const { stdout } = await multipass.runCommand(BASE_VM_NAME, [
+        "sudo", "-u", "ubuntu", "bash", "-lc", check.cmd,
+      ]);
       console.log(chalk.green(`  ${check.name}: ${stdout.trim().split("\n")[0]}`));
     } catch {
-      console.log(chalk.yellow(`  ${check.name}: not found (may need manual install)`));
+      console.log(
+        chalk.yellow(`  ${check.name}: not found (may need manual install)`)
+      );
     }
   }
 
-  // 7. Stop VM and snapshot
-  console.log("\nStopping VM and creating base snapshot...");
-  await multipass.stop(SETUP_VM_NAME);
-  await multipass.snapshot(SETUP_VM_NAME, multipass.BASE_IMAGE_NAME);
-  console.log(chalk.green(`\nBase image "${multipass.BASE_IMAGE_NAME}" created successfully.`));
+  // Stop and snapshot
+  console.log("\nStopping base VM and creating snapshot...");
+  await multipass.stop(BASE_VM_NAME);
+  await multipass.snapshot(BASE_VM_NAME, "base");
+  console.log(chalk.green("Base image ready.\n"));
+}
 
-  // 8. Keep the VM stopped (snapshots are tied to their parent VM in Multipass)
-  console.log(chalk.bold.green("\nInit complete! You can now run: agent-tool setup <project>"));
+export async function init(): Promise<void> {
+  const project = getRepoName();
+  const vmName = projectVMName(project);
+  const projectDir = resolve(".");
+
+  console.log(chalk.bold(`Initializing project: ${project}\n`));
+
+  await multipass.checkMultipass();
+  await ensureBaseImage();
+
+  // Check project VM doesn't already exist
+  if (await multipass.exists(vmName)) {
+    console.error(
+      chalk.red(
+        `Project VM "${vmName}" already exists. Delete it first with "multipass delete --purge ${vmName}" to re-init.`
+      )
+    );
+    process.exit(1);
+  }
+
+  // Clone base VM
+  console.log("Cloning base VM for project...");
+  await multipass.clone(BASE_VM_NAME, vmName);
+  console.log(chalk.green("Cloned."));
+
+  // Start the cloned VM
+  console.log("Starting VM...");
+  await multipass.start(vmName);
+  console.log(chalk.green("Started.\n"));
+
+  // Copy entire project directory into VM
+  const vmProjectDir = `/home/ubuntu/${project}`;
+  console.log("Copying project files into VM...");
+  await multipass.transfer(projectDir, `${vmName}:${vmProjectDir}`, true);
+  console.log(chalk.green("Files copied.\n"));
+
+  // Drop user into shell at project root
+  console.log(
+    chalk.cyan("Dropping you into the VM. Do any VM-specific setup needed.")
+  );
+  console.log(chalk.cyan('Type "exit" when done to snapshot.\n'));
+
+  await multipass.runInteractive(vmName, [
+    "bash", "--login", "-c", `cd ${vmProjectDir} && exec bash`,
+  ]);
+
+  // Snapshot after user exits
+  console.log("\nStopping VM and creating project snapshot...");
+  await multipass.stop(vmName);
+  await multipass.snapshot(vmName, `${project}-ready`);
+  console.log(
+    chalk.bold.green(
+      `\nProject "${project}" is ready! Run "agent-tool start <N>" to boot agent VMs.`
+    )
+  );
 }
