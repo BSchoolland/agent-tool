@@ -6,6 +6,7 @@ import { stop } from "./commands/stop.js";
 import { status } from "./commands/status.js";
 import { open } from "./commands/open.js";
 import { syncPush, syncPull } from "./commands/sync.js";
+import { connect } from "./commands/connect.js";
 
 const program = new Command();
 
@@ -40,6 +41,11 @@ program
   .command("open [agent] [port]")
   .description("Open an agent's dev server in the browser")
   .action(open);
+
+program
+  .command("connect <agent>")
+  .description("SSH into an agent VM (e.g. agent-tool connect 3)")
+  .action(connect);
 
 program
   .command("sync-push <path>")
