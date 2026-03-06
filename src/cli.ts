@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { init } from "./commands/init.js";
 import { start } from "./commands/start.js";
 import { stop } from "./commands/stop.js";
+import { status } from "./commands/status.js";
 
 const program = new Command();
 
@@ -30,10 +31,8 @@ program
 
 program
   .command("status")
-  .description("Show running VMs, branches, and port mappings")
-  .action(() => {
-    console.log("TODO: status");
-  });
+  .description("Show agent VMs, their state, IPs, and branches")
+  .action(status);
 
 program
   .command("sync-push <path>")

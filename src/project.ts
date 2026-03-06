@@ -19,9 +19,9 @@ export function getRepoName(): string {
 }
 
 export function projectVMName(project: string): string {
-  return `agent-tool-project-${project}`;
+  return `at-${project}`;
 }
 
 export function agentVMName(project: string, index: number): string {
-  return `agent-tool-${project}-agent-${index}`;
+  return `at-${project}-${index}`;
 }
