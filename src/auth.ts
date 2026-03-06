@@ -75,6 +75,29 @@ function getGhAccounts(): GhAccount[] {
   return accounts;
 }
 
+async function setupClaudeAuth(vmName: string): Promise<void> {
+  const credentialsPath = join(homedir(), ".claude", ".credentials.json");
+  if (!existsSync(credentialsPath)) return;
+
+  try {
+    // Ensure .claude directory exists in VM
+    await multipass.runCommand(vmName, [
+      "sudo", "-u", "ubuntu", "mkdir", "-p", "/home/ubuntu/.claude",
+    ]);
+    // Copy credentials file into VM
+    await multipass.transfer(
+      credentialsPath,
+      `${vmName}:/home/ubuntu/.claude/.credentials.json`,
+    );
+    // Ensure correct ownership
+    await multipass.runCommand(vmName, [
+      "chown", "ubuntu:ubuntu", "/home/ubuntu/.claude/.credentials.json",
+    ]);
+  } catch (e: any) {
+    console.log(chalk.yellow(`  Warning: could not set up Claude auth: ${e.message}`));
+  }
+}
+
 async function setupGhAuth(vmName: string): Promise<void> {
   const accounts = getGhAccounts();
   if (accounts.length === 0) return;
@@ -95,4 +118,5 @@ async function setupGhAuth(vmName: string): Promise<void> {
 
 export async function mountAuth(vmName: string): Promise<void> {
   await setupGhAuth(vmName);
+  await setupClaudeAuth(vmName);
 }
