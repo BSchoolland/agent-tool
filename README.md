@@ -6,6 +6,7 @@ The mental model: **a team of developers on separate machines, coordinated by a 
 
 ## Prerequisites
 
+- Linux or macOS (Windows is not currently supported)
 - [Multipass](https://multipass.run/) installed and running
 - [tmux](https://github.com/tmux/tmux) installed
 - Node.js 20+
@@ -70,11 +71,11 @@ For syncing gitignored content like `.env`, reference files, etc. Files are expl
 
 ## Architecture
 
-- **Isolation**: Multipass VMs (KVM on Linux, Hyper-V on Windows, QEMU on Mac)
+- **Isolation**: Multipass VMs (KVM on Linux, QEMU on macOS)
 - **Coordination**: Git branches — same as a human dev team
 - **Terminals**: tmux session with one pane per agent
-- **Auth sharing**: Host directories mounted into VMs
-- **File sync**: rsync/scp on demand
+- **Auth sharing**: Host credentials copied into VMs
+- **File sync**: multipass transfer on demand
 
 ## What this tool does NOT do
 
