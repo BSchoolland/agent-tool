@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { init } from "./commands/init.js";
 import { start } from "./commands/start.js";
+import { stop } from "./commands/stop.js";
 
 const program = new Command();
 
@@ -24,10 +25,8 @@ program
 
 program
   .command("stop")
-  .description("Shut down all running VMs")
-  .action(() => {
-    console.log("TODO: stop");
-  });
+  .description("Stop all agent VMs for this project")
+  .action(stop);
 
 program
   .command("status")
