@@ -30,8 +30,12 @@ async function confirm(message: string): Promise<boolean> {
   });
 }
 
-function md5(content: string): string {
+function md5(content: string | Buffer): string {
   return createHash("md5").update(content).digest("hex");
+}
+
+function md5File(filePath: string): string {
+  return md5(readFileSync(filePath));
 }
 
 async function readVMFile(vmName: string, path: string): Promise<string | null> {
@@ -69,7 +73,7 @@ function collectLocalFiles(basePath: string): string[] {
   function walk(dir: string) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
+      if (statSync(full).isDirectory()) {
         walk(full);
       } else {
         files.push(full);
@@ -139,38 +143,37 @@ async function computePushDiffs(
   const localFiles = collectLocalFiles(localBase);
   const isDir = statSync(localBase).isDirectory();
 
-  // Build local checksums
-  const localChecksums = new Map<string, { vmPath: string; rel: string; content: string }>();
+  // Build local checksums (hash only, don't hold file contents in memory)
+  const localFiles_meta = new Map<string, { vmPath: string; rel: string; localFile: string; localMd5: string }>();
   for (const localFile of localFiles) {
     const rel = isDir ? relative(localBase, localFile) : relative(resolve(localBase, ".."), localFile);
     const vmPath = isDir ? join(vmBase, rel) : vmBase;
-    const content = readFileSync(localFile, "utf-8");
-    localChecksums.set(vmPath, { vmPath, rel, content });
+    const localMd5 = md5File(localFile);
+    localFiles_meta.set(vmPath, { vmPath, rel, localFile, localMd5 });
   }
 
   // Get all VM checksums in one call
-  const vmChecksums = isDir
-    ? await getVMChecksums(vmName, vmBase)
-    : await getVMChecksums(vmName, vmBase);
+  const vmChecksums = await getVMChecksums(vmName, vmBase);
 
   // Compare checksums to find changed files
-  const changedFiles: { rel: string; vmPath: string; localContent: string; status: "added" | "modified" }[] = [];
-  for (const [vmPath, { rel, content }] of localChecksums) {
-    const localMd5 = md5(content);
+  const changedFiles: { rel: string; vmPath: string; localFile: string; status: "added" | "modified" }[] = [];
+  for (const [vmPath, { rel, localFile, localMd5 }] of localFiles_meta) {
     const vmMd5 = vmChecksums.get(vmPath);
     if (vmMd5 === undefined) {
-      changedFiles.push({ rel, vmPath, localContent: content, status: "added" });
+      changedFiles.push({ rel, vmPath, localFile, status: "added" });
     } else if (localMd5 !== vmMd5) {
-      changedFiles.push({ rel, vmPath, localContent: content, status: "modified" });
+      changedFiles.push({ rel, vmPath, localFile, status: "modified" });
     }
   }
 
   if (changedFiles.length === 0) return [];
 
-  // Only fetch VM content for modified files (need old content for diff display)
+  // Re-read only changed files for diff display
   const diffs: FileDiff[] = [];
   for (const file of changedFiles) {
-    if (isBinary(file.localContent)) {
+    const localContent = readFileSync(file.localFile, "utf-8");
+
+    if (isBinary(localContent)) {
       diffs.push({
         relativePath: file.rel,
         oldContent: "",
@@ -181,13 +184,13 @@ async function computePushDiffs(
     }
 
     if (file.status === "added") {
-      diffs.push({ relativePath: file.rel, oldContent: "", newContent: file.localContent, status: "added" });
+      diffs.push({ relativePath: file.rel, oldContent: "", newContent: localContent, status: "added" });
     } else {
       const vmContent = await readVMFile(vmName, file.vmPath);
       diffs.push({
         relativePath: file.rel,
         oldContent: vmContent ?? "",
-        newContent: file.localContent,
+        newContent: localContent,
         status: "modified",
       });
     }
@@ -209,7 +212,7 @@ async function computePullDiffs(
     const rel = isDir ? relative(vmBase, vmFile) : relative(resolve(vmBase, ".."), vmFile);
     const localPath = isDir ? join(localBase, rel) : localBase;
     try {
-      localChecksums.set(vmFile, md5(readFileSync(localPath, "utf-8")));
+      localChecksums.set(vmFile, md5File(localPath));
     } catch {
       // File doesn't exist locally
     }

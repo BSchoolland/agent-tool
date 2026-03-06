@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import * as multipass from "./multipass.js";
 
@@ -42,8 +42,9 @@ function getGhAccounts(): GhAccount[] {
       inUsers = false;
     }
     // Username entry under users (deeper indent than "users:")
-    else if (inUsers && /^\s{8}\S+:\s*$/.test(line)) {
-      usernames.push(line.replace(":", "").trim());
+    else if (inUsers && /^\s{8}(\S+):/.test(line)) {
+      const match = line.match(/^\s{8}(\S+):/);
+      if (match) usernames.push(match[1]);
     }
     // Any line at users-level indent or less exits users section
     else if (inUsers && /^\s{0,4}\S/.test(line)) {
@@ -113,7 +114,48 @@ async function setupGhAuth(vmName: string): Promise<void> {
   }
 }
 
+async function setupSshKeys(vmName: string): Promise<void> {
+  const sshDir = join(homedir(), ".ssh");
+  if (!existsSync(sshDir)) return;
+
+  // Ensure ~/.ssh exists in VM with correct permissions
+  await multipass.runCommand(vmName, [
+    "sudo", "-u", "ubuntu", "bash", "-c",
+    "mkdir -p ~/.ssh && chmod 700 ~/.ssh",
+  ]);
+
+  // Copy all key files (id_*) and config
+  const entries = readdirSync(sshDir);
+  const toCopy = entries.filter(
+    (f) => f.startsWith("id_") || f === "config"
+  );
+
+  for (const file of toCopy) {
+    const filePath = join(sshDir, file);
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      const isPrivate = !file.endsWith(".pub") && file !== "config";
+      const perms = isPrivate ? "600" : "644";
+      await multipass.runCommand(vmName, [
+        "sudo", "-u", "ubuntu", "bash", "-c",
+        `cat > ~/.ssh/${basename(file)} << 'SSH_KEY_EOF'\n${content}\nSSH_KEY_EOF\nchmod ${perms} ~/.ssh/${basename(file)}`,
+      ]);
+    } catch (e: any) {
+      console.log(chalk.yellow(`  Warning: could not copy SSH key ${file}: ${e.message}`));
+    }
+  }
+
+  // Add GitHub to known_hosts
+  try {
+    await multipass.runCommand(vmName, [
+      "sudo", "-u", "ubuntu", "bash", "-c",
+      "ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null",
+    ]);
+  } catch {}
+}
+
 export async function mountAuth(vmName: string): Promise<void> {
   await setupGhAuth(vmName);
+  await setupSshKeys(vmName);
   await setupClaudeAuth(vmName);
 }

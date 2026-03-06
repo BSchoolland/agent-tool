@@ -24,9 +24,6 @@ runcmd:
   # Python (usually pre-installed on Ubuntu, ensure pip)
   - apt-get install -y python3-pip python3-venv
 
-  # Rust
-  - su - ubuntu -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-
   # GitHub CLI
   - |
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
@@ -42,5 +39,11 @@ runcmd:
   - |
     curl -fsSL https://get.docker.com | sh
     usermod -aG docker ubuntu
+
+  # Clean up caches to shrink the image
+  - apt-get clean
+  - rm -rf /var/cache/apt/archives/*
+  - su - ubuntu -c "rm -rf ~/.npm/_cacache ~/.nvm/.cache"
+  - fstrim -av
 `;
 }

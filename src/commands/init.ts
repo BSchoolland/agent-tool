@@ -39,12 +39,10 @@ async function ensureBaseImage(): Promise<void> {
   rmSync(cloudInitPath);
   console.log(chalk.green("VM launched.\n"));
 
-  // Wait for cloud-init to finish
-  console.log("Installing dev tools (Node, Bun, Python, Rust, Docker, Claude Code, gh)...");
+  // Wait for cloud-init to finish, streaming its output log
+  console.log("Installing dev tools (Node, Bun, Python, Docker, Claude Code, gh)...\n");
   try {
-    await multipass.runCommand(BASE_VM_NAME, [
-      "cloud-init", "status", "--wait",
-    ]);
+    await multipass.streamCloudInitLog(BASE_VM_NAME);
   } catch (e: any) {
     console.error(
       chalk.yellow(`cloud-init wait returned an error: ${e.message}`)
@@ -54,20 +52,20 @@ async function ensureBaseImage(): Promise<void> {
 
   // Verify key tools
   console.log("\nVerifying installations...");
+  const ENV_SETUP = "source ~/.nvm/nvm.sh 2>/dev/null; export PATH=$HOME/.bun/bin:$PATH;";
   const checks = [
     { name: "node", cmd: "node --version" },
     { name: "bun", cmd: "bun --version" },
     { name: "python3", cmd: "python3 --version" },
     { name: "gh", cmd: "gh --version" },
     { name: "docker", cmd: "docker --version" },
-    { name: "rustc", cmd: "rustc --version" },
     { name: "claude", cmd: "claude --version" },
   ];
 
   for (const check of checks) {
     try {
       const { stdout } = await multipass.runCommand(BASE_VM_NAME, [
-        "sudo", "-u", "ubuntu", "bash", "-lc", check.cmd,
+        "sudo", "-u", "ubuntu", "bash", "-c", `${ENV_SETUP} ${check.cmd}`,
       ]);
       console.log(chalk.green(`  ${check.name}: ${stdout.trim().split("\n")[0]}`));
     } catch {
@@ -104,20 +102,43 @@ export async function init(): Promise<void> {
     process.exit(1);
   }
 
-  // Clone base VM
-  console.log("Cloning base VM for project...");
-  await multipass.clone(BASE_VM_NAME, vmName);
-  console.log(chalk.green("Cloned."));
+  // Clone base VM (retry on qemu-img timeout)
+  const MAX_CLONE_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_CLONE_ATTEMPTS; attempt++) {
+    console.log(`Cloning base VM for project...${attempt > 1 ? ` (attempt ${attempt}/${MAX_CLONE_ATTEMPTS})` : ""}`);
+    const cloneStart = Date.now();
+    const cloneTimer = setInterval(() => {
+      const elapsed = ((Date.now() - cloneStart) / 1000).toFixed(0);
+      process.stderr.write(`\r  ${elapsed}s elapsed...`);
+    }, 1000);
+    try {
+      await multipass.clone(BASE_VM_NAME, vmName);
+      clearInterval(cloneTimer);
+      process.stderr.write("\n");
+      console.log(chalk.green("Cloned."));
+      break;
+    } catch (e: any) {
+      clearInterval(cloneTimer);
+      process.stderr.write("\n");
+      if (attempt === MAX_CLONE_ATTEMPTS) {
+        console.error(chalk.red(`Clone failed after ${MAX_CLONE_ATTEMPTS} attempts: ${e.message}`));
+        process.exit(1);
+      }
+      console.log(chalk.yellow(`Clone failed (${e.message}), retrying...`));
+      // Clean up partial clone if it exists
+      try { await multipass.deleteVM(vmName); } catch {}
+    }
+  }
 
   // Start the cloned VM
   console.log("Starting VM...");
   await multipass.start(vmName);
   console.log(chalk.green("Started.\n"));
 
-  // Copy entire project directory into VM
+  // Copy project directory into VM
   const vmProjectDir = `/home/ubuntu/${project}`;
   console.log("Copying project files into VM...");
-  await multipass.transfer(projectDir, `${vmName}:${vmProjectDir}`, true);
+  await multipass.transferTar(projectDir, vmName, vmProjectDir);
   console.log(chalk.green("Files copied.\n"));
 
   // Mount host auth into VM

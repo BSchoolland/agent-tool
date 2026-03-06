@@ -136,7 +136,14 @@ export async function start(countStr?: string): Promise<void> {
       await multipass.start(vmName);
     } else {
       console.log(`Cloning agent ${i}...`);
+      const cloneStart = Date.now();
+      const cloneTimer = setInterval(() => {
+        const elapsed = ((Date.now() - cloneStart) / 1000).toFixed(0);
+        process.stderr.write(`\r  ${elapsed}s elapsed...`);
+      }, 1000);
       await multipass.clone(sourceVM, vmName);
+      clearInterval(cloneTimer);
+      process.stderr.write("\n");
       console.log(`Starting agent ${i}...`);
       await multipass.start(vmName);
     }
