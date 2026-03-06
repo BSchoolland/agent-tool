@@ -30,13 +30,14 @@ export async function stop(): Promise<void> {
     return;
   }
 
-  for (const vm of agents) {
-    if (vm.state === "Running") {
-      console.log(`Stopping ${vm.name}...`);
-      await multipass.stop(vm.name);
-    } else {
-      console.log(`${vm.name} already stopped.`);
-    }
+  const running = agents.filter((vm) => vm.state === "Running");
+  const stopped = agents.filter((vm) => vm.state !== "Running");
+  for (const vm of stopped) {
+    console.log(`${vm.name} already stopped.`);
+  }
+  if (running.length > 0) {
+    console.log(`Stopping ${running.map((vm) => vm.name).join(", ")}...`);
+    await Promise.all(running.map((vm) => multipass.stop(vm.name)));
   }
 
   console.log(chalk.green(`\nStopped ${agents.length} agent(s). Run "agent-tool start" to resume.`));

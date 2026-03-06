@@ -83,20 +83,19 @@ export async function start(countStr?: string): Promise<void> {
     console.log(chalk.bold(`Resuming ${existing.length} agent(s) for project: ${project}\n`));
 
     // Ensure VMs are started, auth is mounted, and networking is configured
-    const resumeAgents: { vmName: string; agentIndex: number }[] = [];
-    for (let i = 0; i < existing.length; i++) {
-      const vmName = existing[i];
-      const agentIndex = i + 1;
-      const vms = await multipass.list();
-      const vm = vms.find((v) => v.name === vmName);
-      if (vm && vm.state !== "Running") {
-        console.log(`Starting ${vmName}...`);
-        await multipass.start(vmName);
-      }
-      await mountAuth(vmName);
-      await setupVMNetworking(vmName, agentIndex);
-      resumeAgents.push({ vmName, agentIndex });
-    }
+    const vms = await multipass.list();
+    const resumeAgents = existing.map((vmName, i) => ({ vmName, agentIndex: i + 1 }));
+    await Promise.all(
+      resumeAgents.map(async ({ vmName, agentIndex }) => {
+        const vm = vms.find((v) => v.name === vmName);
+        if (vm && vm.state !== "Running") {
+          console.log(`Starting ${vmName}...`);
+          await multipass.start(vmName);
+        }
+        await mountAuth(vmName);
+        await setupVMNetworking(vmName, agentIndex);
+      })
+    );
 
     console.log("Configuring dev server access...");
     await updateHostsFile(resumeAgents);
@@ -141,12 +140,16 @@ export async function start(countStr?: string): Promise<void> {
       console.log(`Starting agent ${i}...`);
       await multipass.start(vmName);
     }
-
-    await mountAuth(vmName);
-    await setupVMNetworking(vmName, i);
-
-    console.log(chalk.green(`  Agent ${i}: ready`));
   }
+
+  // Set up auth and networking in parallel
+  await Promise.all(
+    vmNames.map(async (vmName, i) => {
+      await mountAuth(vmName);
+      await setupVMNetworking(vmName, i + 1);
+      console.log(chalk.green(`  Agent ${i + 1}: ready`));
+    })
+  );
 
   console.log("");
 
