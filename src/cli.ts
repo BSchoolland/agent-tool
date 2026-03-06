@@ -5,6 +5,7 @@ import { start } from "./commands/start.js";
 import { stop } from "./commands/stop.js";
 import { status } from "./commands/status.js";
 import { open } from "./commands/open.js";
+import { syncPush, syncPull } from "./commands/sync.js";
 
 const program = new Command();
 
@@ -42,16 +43,12 @@ program
 
 program
   .command("sync-push <path>")
-  .description("Copy a file or directory from host to all VMs")
-  .action((path: string) => {
-    console.log(`TODO: sync-push ${path}`);
-  });
+  .description("Copy a file or directory from host to all running agent VMs")
+  .action(syncPush);
 
 program
   .command("sync-pull <agent> <path>")
   .description("Copy a file or directory from a specific VM to host")
-  .action((agent: string, path: string) => {
-    console.log(`TODO: sync-pull ${agent} ${path}`);
-  });
+  .action(syncPull);
 
 program.parse();

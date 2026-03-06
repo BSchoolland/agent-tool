@@ -145,17 +145,7 @@ export async function start(countStr?: string): Promise<void> {
     await mountAuth(vmName);
     await setupVMNetworking(vmName, i);
 
-    // Create git branch inside VM
-    const branchName = `agent-${i}`;
-    try {
-      await multipass.runCommand(vmName, [
-        "sudo", "-u", "ubuntu", "bash", "-lc",
-        `cd /home/ubuntu/${project} && git checkout -b ${branchName} 2>/dev/null || git checkout ${branchName}`,
-      ]);
-      console.log(chalk.green(`  Agent ${i}: branch "${branchName}"`));
-    } catch {
-      console.log(chalk.yellow(`  Agent ${i}: started (could not set up git branch)`));
-    }
+    console.log(chalk.green(`  Agent ${i}: ready`));
   }
 
   console.log("");

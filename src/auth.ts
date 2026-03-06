@@ -84,14 +84,11 @@ async function setupClaudeAuth(vmName: string): Promise<void> {
     await multipass.runCommand(vmName, [
       "sudo", "-u", "ubuntu", "mkdir", "-p", "/home/ubuntu/.claude",
     ]);
-    // Copy credentials file into VM
-    await multipass.transfer(
-      credentialsPath,
-      `${vmName}:/home/ubuntu/.claude/.credentials.json`,
-    );
-    // Ensure correct ownership
+    // Read credentials and write into VM via stdin (avoids snap SFTP permission issues)
+    const credentials = readFileSync(credentialsPath, "utf-8");
     await multipass.runCommand(vmName, [
-      "chown", "ubuntu:ubuntu", "/home/ubuntu/.claude/.credentials.json",
+      "sudo", "-u", "ubuntu", "bash", "-c",
+      `cat > /home/ubuntu/.claude/.credentials.json << 'CREDENTIALS_EOF'\n${credentials}\nCREDENTIALS_EOF\nchmod 600 /home/ubuntu/.claude/.credentials.json`,
     ]);
   } catch (e: any) {
     console.log(chalk.yellow(`  Warning: could not set up Claude auth: ${e.message}`));
