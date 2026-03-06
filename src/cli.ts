@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { init } from "./commands/init.js";
 
 const program = new Command();
 
@@ -13,9 +14,7 @@ program
 program
   .command("init")
   .description("One-time setup: build base VM image with common dev tools")
-  .action(() => {
-    console.log("TODO: init");
-  });
+  .action(init);
 
 program
   .command("setup <project>")
