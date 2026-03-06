@@ -71,17 +71,6 @@ export async function updateHostsFile(agents: { vmName: string; agentIndex: numb
   });
 }
 
-export function cleanupHostsFile(): void {
-  const hostsContent = readFileSync(HOSTS_FILE, "utf-8");
-  const cleaned = removeAgentToolBlock(hostsContent);
-
-  if (cleaned !== hostsContent) {
-    execFileSync("sudo", ["tee", HOSTS_FILE], {
-      input: cleaned,
-      stdio: ["pipe", "ignore", "inherit"],
-    });
-  }
-}
 
 function removeAgentToolBlock(content: string): string {
   const lines = content.split("\n");
