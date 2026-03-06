@@ -1,0 +1,25 @@
+{
+  "name": "agent-tool",
+  "version": "0.1.0",
+  "description": "Run multiple AI coding agents in parallel using isolated Multipass VMs",
+  "type": "module",
+  "bin": {
+    "agent-tool": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "bun build src/cli.ts --outdir dist --target node",
+    "dev": "bun run src/cli.ts",
+    "start": "bun dist/cli.js"
+  },
+  "keywords": ["ai", "agent", "multipass", "vm", "parallel"],
+  "author": "Ben Schoolland",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  }
+}
