@@ -120,6 +120,10 @@ export async function restore(vmName: string, snapshotName: string): Promise<voi
   await exec(["restore", `${vmName}.${snapshotName}`, "--destructive"]);
 }
 
+export async function mount(hostPath: string, vmName: string, vmPath: string): Promise<void> {
+  await exec(["mount", hostPath, `${vmName}:${vmPath}`]);
+}
+
 export async function exists(name: string): Promise<boolean> {
   try {
     const vms = await list();

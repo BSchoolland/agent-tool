@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import * as multipass from "../multipass.js";
 import { getBaseCloudInit } from "../cloud-init.js";
 import { getRepoName, projectVMName } from "../project.js";
+import { mountAuth } from "../auth.js";
 
 const BASE_VM_NAME = "agent-tool-base";
 
@@ -118,6 +119,9 @@ export async function init(): Promise<void> {
   console.log("Copying project files into VM...");
   await multipass.transfer(projectDir, `${vmName}:${vmProjectDir}`, true);
   console.log(chalk.green("Files copied.\n"));
+
+  // Mount host auth into VM
+  await mountAuth(vmName);
 
   // Drop user into shell at project root
   console.log(

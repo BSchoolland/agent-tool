@@ -2,6 +2,7 @@ import chalk from "chalk";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as multipass from "../multipass.js";
 import { getRepoName, projectVMName, agentVMName } from "../project.js";
+import { mountAuth } from "../auth.js";
 
 function checkTmux(): void {
   try {
@@ -72,7 +73,7 @@ export async function start(countStr?: string): Promise<void> {
 
     console.log(chalk.bold(`Resuming ${existing.length} agent(s) for project: ${project}\n`));
 
-    // Ensure VMs are started
+    // Ensure VMs are started and auth is mounted
     for (const vmName of existing) {
       const vms = await multipass.list();
       const vm = vms.find((v) => v.name === vmName);
@@ -80,6 +81,7 @@ export async function start(countStr?: string): Promise<void> {
         console.log(`Starting ${vmName}...`);
         await multipass.start(vmName);
       }
+      await mountAuth(vmName);
     }
 
     createTmuxSession(sessionName, existing, project);
@@ -121,6 +123,8 @@ export async function start(countStr?: string): Promise<void> {
       console.log(`Starting agent ${i}...`);
       await multipass.start(vmName);
     }
+
+    await mountAuth(vmName);
 
     // Create git branch inside VM
     const branchName = `agent-${i}`;
