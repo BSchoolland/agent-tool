@@ -29,11 +29,13 @@ export async function status(): Promise<void> {
 
   console.log(`\n  Agents: ${agents.length}\n`);
   console.log(
-    `  ${"NAME".padEnd(40)} ${"STATE".padEnd(12)} ${"IP".padEnd(16)} BRANCH`
+    `  ${"NAME".padEnd(40)} ${"STATE".padEnd(12)} ${"DEV SERVER".padEnd(24)} BRANCH`
   );
-  console.log(`  ${"─".repeat(40)} ${"─".repeat(12)} ${"─".repeat(16)} ${"─".repeat(20)}`);
+  console.log(`  ${"─".repeat(40)} ${"─".repeat(12)} ${"─".repeat(24)} ${"─".repeat(20)}`);
 
-  for (const vm of agents) {
+  for (let i = 0; i < agents.length; i++) {
+    const vm = agents[i];
+    const agentIndex = i + 1;
     let branch = "—";
     if (vm.state === "Running") {
       try {
@@ -48,8 +50,9 @@ export async function status(): Promise<void> {
     }
 
     const stateColor = vm.state === "Running" ? chalk.green : chalk.yellow;
+    const devServer = vm.state === "Running" ? `agent-${agentIndex}.local:<port>` : "—";
     console.log(
-      `  ${vm.name.padEnd(40)} ${stateColor(vm.state.padEnd(12))} ${(vm.ipv4 || "—").padEnd(16)} ${branch}`
+      `  ${vm.name.padEnd(40)} ${stateColor(vm.state.padEnd(12))} ${(devServer).padEnd(24)} ${branch}`
     );
   }
 }

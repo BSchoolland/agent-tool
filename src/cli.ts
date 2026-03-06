@@ -4,6 +4,7 @@ import { init } from "./commands/init.js";
 import { start } from "./commands/start.js";
 import { stop } from "./commands/stop.js";
 import { status } from "./commands/status.js";
+import { open } from "./commands/open.js";
 
 const program = new Command();
 
@@ -33,6 +34,11 @@ program
   .command("status")
   .description("Show agent VMs, their state, IPs, and branches")
   .action(status);
+
+program
+  .command("open [agent] [port]")
+  .description("Open an agent's dev server in the browser")
+  .action(open);
 
 program
   .command("sync-push <path>")

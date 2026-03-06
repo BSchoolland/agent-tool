@@ -3,6 +3,15 @@ import { execFileSync, spawnSync } from "node:child_process";
 import * as multipass from "../multipass.js";
 import { getRepoName, projectVMName, agentVMName } from "../project.js";
 import { mountAuth } from "../auth.js";
+import { setupVMNetworking, updateHostsFile } from "../networking.js";
+
+function printAccessInfo(agents: { vmName: string; agentIndex: number }[]): void {
+  console.log(chalk.cyan("\n  Dev servers will be accessible at:"));
+  for (const agent of agents) {
+    console.log(chalk.cyan(`    agent-${agent.agentIndex}.local:<port>`));
+  }
+  console.log(chalk.cyan("  (any port the dev server uses will work)\n"));
+}
 
 function checkTmux(): void {
   try {
@@ -73,8 +82,11 @@ export async function start(countStr?: string): Promise<void> {
 
     console.log(chalk.bold(`Resuming ${existing.length} agent(s) for project: ${project}\n`));
 
-    // Ensure VMs are started and auth is mounted
-    for (const vmName of existing) {
+    // Ensure VMs are started, auth is mounted, and networking is configured
+    const resumeAgents: { vmName: string; agentIndex: number }[] = [];
+    for (let i = 0; i < existing.length; i++) {
+      const vmName = existing[i];
+      const agentIndex = i + 1;
       const vms = await multipass.list();
       const vm = vms.find((v) => v.name === vmName);
       if (vm && vm.state !== "Running") {
@@ -82,7 +94,13 @@ export async function start(countStr?: string): Promise<void> {
         await multipass.start(vmName);
       }
       await mountAuth(vmName);
+      await setupVMNetworking(vmName, agentIndex);
+      resumeAgents.push({ vmName, agentIndex });
     }
+
+    console.log("Configuring dev server access...");
+    await updateHostsFile(resumeAgents);
+    printAccessInfo(resumeAgents);
 
     createTmuxSession(sessionName, existing, project);
     console.log(chalk.bold.green(`Resumed ${existing.length} agent(s).`));
@@ -125,6 +143,7 @@ export async function start(countStr?: string): Promise<void> {
     }
 
     await mountAuth(vmName);
+    await setupVMNetworking(vmName, i);
 
     // Create git branch inside VM
     const branchName = `agent-${i}`;
@@ -140,6 +159,12 @@ export async function start(countStr?: string): Promise<void> {
   }
 
   console.log("");
+
+  // Set up host access to dev servers
+  const newAgents = vmNames.map((name, i) => ({ vmName: name, agentIndex: i + 1 }));
+  console.log("Configuring dev server access...");
+  await updateHostsFile(newAgents);
+  printAccessInfo(newAgents);
 
   createTmuxSession(sessionName, vmNames, project);
   console.log(chalk.bold.green(`tmux session created with ${count} agent(s).`));
