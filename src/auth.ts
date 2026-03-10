@@ -76,23 +76,31 @@ function getGhAccounts(): GhAccount[] {
   return accounts;
 }
 
-async function setupClaudeAuth(vmName: string): Promise<void> {
-  const credentialsPath = join(homedir(), ".claude", ".credentials.json");
-  if (!existsSync(credentialsPath)) return;
+async function mountClaudeDir(vmName: string): Promise<void> {
+  const claudeDir = join(homedir(), ".claude");
+  if (!existsSync(claudeDir)) return;
 
   try {
-    // Ensure .claude directory exists in VM
-    await multipass.runCommand(vmName, [
-      "sudo", "-u", "ubuntu", "mkdir", "-p", "/home/ubuntu/.claude",
-    ]);
-    // Read credentials and write into VM via stdin (avoids snap SFTP permission issues)
-    const credentials = readFileSync(credentialsPath, "utf-8");
-    await multipass.runCommand(vmName, [
-      "sudo", "-u", "ubuntu", "bash", "-c",
-      `cat > /home/ubuntu/.claude/.credentials.json << 'CREDENTIALS_EOF'\n${credentials}\nCREDENTIALS_EOF\nchmod 600 /home/ubuntu/.claude/.credentials.json`,
-    ]);
+    await multipass.mount(claudeDir, vmName, "/home/ubuntu/.claude");
   } catch (e: any) {
-    console.log(chalk.yellow(`  Warning: could not set up Claude auth: ${e.message}`));
+    // Already mounted is fine
+    if (!e.message.includes("already mounted")) {
+      console.log(chalk.yellow(`  Warning: could not mount ~/.claude: ${e.message}`));
+    }
+  }
+
+  // Copy ~/.claude.json into the VM (can't mount a single file)
+  const claudeJson = join(homedir(), ".claude.json");
+  if (existsSync(claudeJson)) {
+    try {
+      const content = readFileSync(claudeJson, "utf-8");
+      await multipass.runCommand(vmName, [
+        "sudo", "-u", "ubuntu", "bash", "-c",
+        `cat > /home/ubuntu/.claude.json << 'CLAUDE_JSON_EOF'\n${content}\nCLAUDE_JSON_EOF\nchmod 600 /home/ubuntu/.claude.json`,
+      ]);
+    } catch (e: any) {
+      console.log(chalk.yellow(`  Warning: could not copy ~/.claude.json: ${e.message}`));
+    }
   }
 }
 
@@ -157,5 +165,5 @@ async function setupSshKeys(vmName: string): Promise<void> {
 export async function mountAuth(vmName: string): Promise<void> {
   await setupGhAuth(vmName);
   await setupSshKeys(vmName);
-  await setupClaudeAuth(vmName);
+  await mountClaudeDir(vmName);
 }
