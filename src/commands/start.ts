@@ -1,173 +1,55 @@
 import chalk from "chalk";
-import { execFileSync, spawnSync } from "node:child_process";
 import * as multipass from "../multipass.js";
-import { getRepoName, projectVMName, agentVMName } from "../project.js";
+import { vmName } from "../project.js";
 import { mountAuth } from "../auth.js";
-import { setupVMNetworking, updateHostsFile } from "../networking.js";
 
-function printAccessInfo(agents: { vmName: string; agentIndex: number }[]): void {
-  console.log(chalk.cyan("\n  Dev servers will be accessible at:"));
-  for (const agent of agents) {
-    console.log(chalk.cyan(`    agent-${agent.agentIndex}.local:<port>`));
-  }
-  console.log(chalk.cyan("  (any port the dev server uses will work)\n"));
-}
-
-function checkTmux(): void {
-  try {
-    execFileSync("which", ["tmux"]);
-  } catch {
-    console.error(chalk.red("tmux is not installed. Install it first."));
-    process.exit(1);
-  }
-}
-
-function createTmuxSession(sessionName: string, vmNames: string[], project: string): void {
-  const vmProjectDir = `/home/ubuntu/${project}`;
-
-  // Kill existing session if any
-  try {
-    execFileSync("tmux", ["kill-session", "-t", sessionName], { stdio: "ignore" });
-  } catch {
-    // No existing session
-  }
-
-  // Create session with first agent
-  execFileSync("tmux", [
-    "new-session", "-d", "-s", sessionName,
-    "-n", "agent-1",
-    "multipass", "exec", vmNames[0], "--", "bash", "--login", "-c",
-    `cd ${vmProjectDir} && exec bash`,
-  ]);
-
-  // Add remaining agents as new windows
-  for (let i = 1; i < vmNames.length; i++) {
-    execFileSync("tmux", [
-      "new-window", "-t", sessionName,
-      "-n", `agent-${i + 1}`,
-      "multipass", "exec", vmNames[i], "--", "bash", "--login", "-c",
-      `cd ${vmProjectDir} && exec bash`,
-    ]);
-  }
-}
-
-function attachTmux(sessionName: string): void {
-  spawnSync("tmux", ["attach-session", "-t", sessionName], { stdio: "inherit" });
-}
-
-async function findRunningAgents(project: string): Promise<string[]> {
-  const prefix = agentVMName(project, 0).replace(/0$/, "");
+async function findAllAgentVMs(): Promise<{ name: string; state: string }[]> {
   const vms = await multipass.list();
-  return vms
-    .filter((vm) => vm.name.startsWith(prefix))
-    .map((vm) => vm.name)
-    .sort();
+  return vms.filter((vm) => /^agent-tool-\d+$/.test(vm.name));
 }
 
-export async function start(countStr?: string): Promise<void> {
-  const project = getRepoName();
-  const sourceVM = projectVMName(project);
-  const sessionName = `agent-tool-${project}`;
-
+export async function start(vmNumbers: string[]): Promise<void> {
   await multipass.checkMultipass();
-  checkTmux();
 
-  // No count given — resume existing agents
-  if (!countStr) {
-    const existing = await findRunningAgents(project);
-    if (existing.length === 0) {
-      console.error(chalk.red("No agent VMs found. Run \"agent-tool start <count>\" to create them."));
-      process.exit(1);
+  let targets: string[];
+
+  if (vmNumbers.length === 0) {
+    // Start all stopped agent-tool VMs
+    const agents = await findAllAgentVMs();
+    const stopped = agents.filter((vm) => vm.state !== "Running");
+    if (stopped.length === 0) {
+      console.log("All VMs are already running.");
+      return;
     }
-
-    console.log(chalk.bold(`Resuming ${existing.length} agent(s) for project: ${project}\n`));
-
-    // Ensure VMs are started, auth is mounted, and networking is configured
-    const vms = await multipass.list();
-    const resumeAgents = existing.map((vmName, i) => ({ vmName, agentIndex: i + 1 }));
-    await Promise.all(
-      resumeAgents.map(async ({ vmName, agentIndex }) => {
-        const vm = vms.find((v) => v.name === vmName);
-        if (vm && vm.state !== "Running") {
-          console.log(`Starting ${vmName}...`);
-          await multipass.start(vmName);
-        }
-        await mountAuth(vmName);
-        await setupVMNetworking(vmName, agentIndex);
-      })
-    );
-
-    console.log("Configuring dev server access...");
-    await updateHostsFile(resumeAgents);
-    printAccessInfo(resumeAgents);
-
-    createTmuxSession(sessionName, existing, project);
-    console.log(chalk.bold.green(`Resumed ${existing.length} agent(s).`));
-    console.log(chalk.cyan(`Attaching... (detach with Ctrl-b d)\n`));
-    attachTmux(sessionName);
-    return;
+    targets = stopped.map((vm) => vm.name);
+  } else {
+    targets = vmNumbers.map((n) => {
+      const index = parseInt(n, 10);
+      if (isNaN(index) || index < 1) {
+        console.error(chalk.red(`Invalid VM number: ${n}`));
+        process.exit(1);
+      }
+      return vmName(index);
+    });
   }
 
-  // Count given — create new agents
-  const count = parseInt(countStr, 10);
-  if (isNaN(count) || count < 1) {
-    console.error(chalk.red("Count must be a positive number."));
-    process.exit(1);
-  }
+  console.log(chalk.bold(`Starting ${targets.length} VM(s)...\n`));
 
-  // Check project VM exists
-  if (!(await multipass.exists(sourceVM))) {
-    console.error(
-      chalk.red(`Project VM "${sourceVM}" not found. Run "agent-tool init" first.`)
-    );
-    process.exit(1);
-  }
-
-  console.log(chalk.bold(`Starting ${count} agent(s) for project: ${project}\n`));
-
-  // Clone and start VMs
-  const vmNames: string[] = [];
-  for (let i = 1; i <= count; i++) {
-    const vmName = agentVMName(project, i);
-    vmNames.push(vmName);
-
-    if (await multipass.exists(vmName)) {
-      console.log(`Agent ${i} VM already exists, starting...`);
-      await multipass.start(vmName);
-    } else {
-      console.log(`Cloning agent ${i}...`);
-      const cloneStart = Date.now();
-      const cloneTimer = setInterval(() => {
-        const elapsed = ((Date.now() - cloneStart) / 1000).toFixed(0);
-        process.stderr.write(`\r  ${elapsed}s elapsed...`);
-      }, 1000);
-      await multipass.clone(sourceVM, vmName);
-      clearInterval(cloneTimer);
-      process.stderr.write("\n");
-      console.log(`Starting agent ${i}...`);
-      await multipass.start(vmName);
-    }
-  }
-
-  // Set up auth and networking in parallel
   await Promise.all(
-    vmNames.map(async (vmName, i) => {
-      await mountAuth(vmName);
-      await setupVMNetworking(vmName, i + 1);
-      console.log(chalk.green(`  Agent ${i + 1}: ready`));
+    targets.map(async (name) => {
+      const vms = await multipass.list();
+      const vm = vms.find((v) => v.name === name);
+      if (!vm) {
+        console.log(chalk.yellow(`  ${name}: not found`));
+        return;
+      }
+      if (vm.state === "Running") {
+        console.log(`  ${name}: already running`);
+      } else {
+        await multipass.start(name);
+        console.log(chalk.green(`  ${name}: started`));
+      }
+      await mountAuth(name);
     })
   );
-
-  console.log("");
-
-  // Set up host access to dev servers
-  const newAgents = vmNames.map((name, i) => ({ vmName: name, agentIndex: i + 1 }));
-  console.log("Configuring dev server access...");
-  await updateHostsFile(newAgents);
-  printAccessInfo(newAgents);
-
-  createTmuxSession(sessionName, vmNames, project);
-  console.log(chalk.bold.green(`tmux session created with ${count} agent(s).`));
-  console.log(chalk.cyan(`Attaching... (detach with Ctrl-b d)\n`));
-  attachTmux(sessionName);
 }

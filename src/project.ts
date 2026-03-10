@@ -18,10 +18,6 @@ export function getRepoName(): string {
   }
 }
 
-export function projectVMName(project: string): string {
-  return `at-${project}`;
-}
-
-export function agentVMName(project: string, index: number): string {
-  return `at-${project}-${index}`;
+export function vmName(index: number): string {
+  return `agent-tool-${index}`;
 }

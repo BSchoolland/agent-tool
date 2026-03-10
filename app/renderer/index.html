@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self';">
+<title>agent-tool</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="tabbar" id="tabbar"></div>
+
+  <div id="main-content"></div>
+
+  <div class="statusbar">
+    <span class="statusbar-item" id="statusbar-vm-count"></span>
+    <span class="statusbar-item"><span class="hosted-label" id="statusbar-hosted"></span></span>
+    <span class="statusbar-item" style="margin-left:auto">agent-tool v0.1.0</span>
+  </div>
+</div>
+
+<!-- ── Sync Modal ── -->
+<div class="modal-backdrop" id="sync-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Sync to <span id="sync-modal-vm">VM 1</span></span>
+      <button class="modal-close" id="sync-modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="sync-dropzone" id="sync-dropzone">
+        <div class="sync-dropzone-label">Choose file or folder</div>
+        <div class="sync-dropzone-hint">Opens file explorer — syncs to same relative path on VM</div>
+      </div>
+      <div class="sync-selection" id="sync-selection">
+        <div class="sync-file-row">
+          <span class="sync-file-name"><svg viewBox="0 0 16 16"><path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" fill="currentColor"/></svg> <span id="sync-file-name-text"></span></span>
+          <span class="sync-file-size" id="sync-file-size"></span>
+        </div>
+        <div class="sync-dest">&#8594; <span id="sync-dest-path"></span></div>
+      </div>
+      <div class="sync-warning" id="sync-warning">&#9888; Selection is <span id="sync-warning-size"></span> — this may take a while. Are you sure?</div>
+    </div>
+    <div class="modal-footer" id="sync-footer" style="display:none">
+      <button class="modal-btn ghost" id="sync-cancel-btn">cancel</button>
+      <button class="modal-btn primary" id="sync-confirm-btn">sync</button>
+    </div>
+  </div>
+</div>
+
+<script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="renderer.js"></script>
+
+</body>
+</html>

@@ -1,99 +1,123 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import * as multipass from "./multipass.js";
 
-const HOSTS_FILE = "/etc/hosts";
-const MARKER_START = "# agent-tool:start";
-const MARKER_END = "# agent-tool:end";
+const STATE_FILE = "/tmp/agent-tool-hosted";
 
-function agentHostname(agentIndex: number): string {
-  return `agent-${agentIndex}.local`;
+interface HostState {
+  agentIndex: number;
+  vmName: string;
+  vmIp: string;
 }
 
-export async function setupVMNetworking(vmName: string, agentIndex: number): Promise<void> {
-  const hostname = agentHostname(agentIndex);
+export function getHostedAgent(): HostState | null {
+  try {
+    if (!existsSync(STATE_FILE)) return null;
+    return JSON.parse(readFileSync(STATE_FILE, "utf-8"));
+  } catch {
+    return null;
+  }
+}
 
+function writeState(state: HostState): void {
+  writeFileSync(STATE_FILE, JSON.stringify(state));
+}
+
+function clearState(): void {
+  try {
+    unlinkSync(STATE_FILE);
+  } catch {
+    // Already gone
+  }
+}
+
+function sudo(args: string[]): void {
+  execFileSync("sudo", args, { stdio: "inherit" });
+}
+
+function addIptablesRules(vmIp: string): void {
   // Enable routing to loopback from external interfaces
-  await multipass.runCommand(vmName, [
-    "sudo", "sysctl", "-w", "net.ipv4.conf.all.route_localnet=1",
+  sudo(["sysctl", "-w", "net.ipv4.conf.all.route_localnet=1"]);
+
+  // Redirect localhost TCP traffic (non-privileged ports) to VM — IPv4
+  sudo([
+    "iptables", "-t", "nat", "-A", "OUTPUT",
+    "-p", "tcp", "-d", "127.0.0.1",
+    "--dport", "1024:65535",
+    "-j", "DNAT", "--to-destination", vmIp,
   ]);
 
-  // DNAT all incoming TCP to localhost (makes localhost-bound services reachable via VM IP)
-  await multipass.runCommand(vmName, [
-    "sudo", "iptables", "-t", "nat", "-C", "PREROUTING",
-    "-p", "tcp", "!", "-i", "lo", "-j", "DNAT", "--to-destination", "127.0.0.1",
-  ]).catch(() =>
-    multipass.runCommand(vmName, [
-      "sudo", "iptables", "-t", "nat", "-A", "PREROUTING",
-      "-p", "tcp", "!", "-i", "lo", "-j", "DNAT", "--to-destination", "127.0.0.1",
-    ])
-  );
-
-  // Add hostname to VM's /etc/hosts so dev servers can bind to it
-  await multipass.runCommand(vmName, [
-    "sudo", "bash", "-c",
-    `grep -q '${hostname}' /etc/hosts || echo '127.0.0.1 ${hostname}' >> /etc/hosts`,
+  // Reject IPv6 localhost so clients fall back to IPv4 (where DNAT applies)
+  sudo([
+    "ip6tables", "-A", "OUTPUT",
+    "-p", "tcp", "-d", "::1",
+    "--dport", "1024:65535",
+    "-j", "REJECT", "--reject-with", "icmp6-addr-unreachable",
   ]);
 
-  // Set HOST env var so dev servers print clickable URLs
-  await multipass.runCommand(vmName, [
-    "sudo", "-u", "ubuntu", "bash", "-c",
-    `grep -q 'HOST=${hostname}' ~/.bashrc || echo 'export HOST=${hostname}' >> ~/.bashrc`,
+  // Masquerade so return traffic routes correctly
+  sudo([
+    "iptables", "-t", "nat", "-A", "POSTROUTING",
+    "-p", "tcp", "-d", vmIp,
+    "--dport", "1024:65535",
+    "-j", "MASQUERADE",
   ]);
 }
 
-export async function updateHostsFile(agents: { vmName: string; agentIndex: number }[]): Promise<void> {
-  // Get IPs for all agents
-  const entries: string[] = [];
-  for (const agent of agents) {
-    const vms = await multipass.list();
-    const vm = vms.find((v) => v.name === agent.vmName);
-    if (vm && vm.ipv4) {
-      entries.push(`${vm.ipv4}  ${agentHostname(agent.agentIndex)}`);
-    }
+function removeIptablesRules(vmIp: string): void {
+  try {
+    sudo([
+      "iptables", "-t", "nat", "-D", "OUTPUT",
+      "-p", "tcp", "-d", "127.0.0.1",
+      "--dport", "1024:65535",
+      "-j", "DNAT", "--to-destination", vmIp,
+    ]);
+  } catch {
+    // Rule may not exist
   }
 
-  if (entries.length === 0) return;
-
-  const hostsContent = readFileSync(HOSTS_FILE, "utf-8");
-
-  // Remove existing agent-tool block
-  const cleaned = removeAgentToolBlock(hostsContent);
-
-  // Append new block
-  const newBlock = `${MARKER_START}\n${entries.join("\n")}\n${MARKER_END}`;
-  const updated = cleaned.trimEnd() + "\n" + newBlock + "\n";
-
-  // Write via sudo tee
-  execFileSync("sudo", ["tee", HOSTS_FILE], {
-    input: updated,
-    stdio: ["pipe", "ignore", "inherit"],
-  });
-}
-
-
-function removeAgentToolBlock(content: string): string {
-  const lines = content.split("\n");
-  const result: string[] = [];
-  let inBlock = false;
-
-  for (const line of lines) {
-    if (line.trim() === MARKER_START) {
-      inBlock = true;
-      continue;
-    }
-    if (line.trim() === MARKER_END) {
-      inBlock = false;
-      continue;
-    }
-    if (!inBlock) {
-      result.push(line);
-    }
+  try {
+    sudo([
+      "ip6tables", "-D", "OUTPUT",
+      "-p", "tcp", "-d", "::1",
+      "--dport", "1024:65535",
+      "-j", "REJECT", "--reject-with", "icmp6-addr-unreachable",
+    ]);
+  } catch {
+    // Rule may not exist
   }
 
-  return result.join("\n");
+  try {
+    sudo([
+      "iptables", "-t", "nat", "-D", "POSTROUTING",
+      "-p", "tcp", "-d", vmIp,
+      "--dport", "1024:65535",
+      "-j", "MASQUERADE",
+    ]);
+  } catch {
+    // Rule may not exist
+  }
 }
 
-export function getAgentUrl(agentIndex: number, port: number): string {
-  return `http://${agentHostname(agentIndex)}:${port}`;
+export async function hostAgent(vmName: string, agentIndex: number): Promise<void> {
+  // Tear down existing forwarding first
+  await unhostAgent();
+
+  // Get VM IP
+  const vms = await multipass.list();
+  const vm = vms.find((v) => v.name === vmName);
+  if (!vm || !vm.ipv4) {
+    throw new Error(`Cannot find IP for VM ${vmName}. Is it running?`);
+  }
+
+  addIptablesRules(vm.ipv4);
+  writeState({ agentIndex, vmName, vmIp: vm.ipv4 });
+}
+
+export async function unhostAgent(): Promise<void> {
+  const state = getHostedAgent();
+  if (!state) return;
+
+  removeIptablesRules(state.vmIp);
+  clearState();
 }

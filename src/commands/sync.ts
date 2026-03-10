@@ -5,7 +5,7 @@ import { readFileSync, statSync, readdirSync } from "node:fs";
 import { resolve, join, relative } from "node:path";
 import { createInterface } from "node:readline";
 import * as multipass from "../multipass.js";
-import { getRepoName, agentVMName } from "../project.js";
+import { getRepoName, vmName } from "../project.js";
 
 function formatDiff(patch: string): string {
   return patch
@@ -84,17 +84,6 @@ function collectLocalFiles(basePath: string): string[] {
   return files;
 }
 
-async function collectVMFiles(vmName: string, basePath: string): Promise<string[]> {
-  try {
-    const { stdout } = await multipass.runCommand(vmName, [
-      "find", basePath, "-type", "f",
-    ]);
-    return stdout.trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
 /** Get md5 checksums for all files under a path on a VM in a single exec call. */
 async function getVMChecksums(vmName: string, basePath: string): Promise<Map<string, string>> {
   const checksums = new Map<string, string>();
@@ -119,15 +108,6 @@ function isBinary(content: string): boolean {
   return content.includes("\0");
 }
 
-async function findRunningAgents(project: string): Promise<string[]> {
-  const prefix = agentVMName(project, 0).replace(/0$/, "");
-  const vms = await multipass.list();
-  return vms
-    .filter((vm) => vm.name.startsWith(prefix) && vm.state === "Running")
-    .map((vm) => vm.name)
-    .sort();
-}
-
 interface FileDiff {
   relativePath: string;
   oldContent: string;
@@ -137,13 +117,13 @@ interface FileDiff {
 
 async function computePushDiffs(
   localBase: string,
-  vmName: string,
+  targetVM: string,
   vmBase: string
 ): Promise<FileDiff[]> {
   const localFiles = collectLocalFiles(localBase);
   const isDir = statSync(localBase).isDirectory();
 
-  // Build local checksums (hash only, don't hold file contents in memory)
+  // Build local checksums
   const localFiles_meta = new Map<string, { vmPath: string; rel: string; localFile: string; localMd5: string }>();
   for (const localFile of localFiles) {
     const rel = isDir ? relative(localBase, localFile) : relative(resolve(localBase, ".."), localFile);
@@ -153,7 +133,7 @@ async function computePushDiffs(
   }
 
   // Get all VM checksums in one call
-  const vmChecksums = await getVMChecksums(vmName, vmBase);
+  const vmChecksums = await getVMChecksums(targetVM, vmBase);
 
   // Compare checksums to find changed files
   const changedFiles: { rel: string; vmPath: string; localFile: string; status: "added" | "modified" }[] = [];
@@ -186,7 +166,7 @@ async function computePushDiffs(
     if (file.status === "added") {
       diffs.push({ relativePath: file.rel, oldContent: "", newContent: localContent, status: "added" });
     } else {
-      const vmContent = await readVMFile(vmName, file.vmPath);
+      const vmContent = await readVMFile(targetVM, file.vmPath);
       diffs.push({
         relativePath: file.rel,
         oldContent: vmContent ?? "",
@@ -199,12 +179,12 @@ async function computePushDiffs(
 }
 
 async function computePullDiffs(
-  vmName: string,
+  targetVM: string,
   vmBase: string,
   localBase: string
 ): Promise<FileDiff[]> {
-  const isDir = await vmIsDirectory(vmName, vmBase);
-  const vmFiles = isDir ? await collectVMFiles(vmName, vmBase) : [vmBase];
+  const isDir = await vmIsDirectory(targetVM, vmBase);
+  const vmFiles = isDir ? await collectVMFiles(targetVM, vmBase) : [vmBase];
 
   // Build local checksums for comparison
   const localChecksums = new Map<string, string>();
@@ -219,7 +199,7 @@ async function computePullDiffs(
   }
 
   // Get all VM checksums in one call
-  const vmChecksums = await getVMChecksums(vmName, isDir ? vmBase : resolve(vmBase, ".."));
+  const vmChecksums = await getVMChecksums(targetVM, isDir ? vmBase : resolve(vmBase, ".."));
 
   // Find changed files
   const changedFiles: { vmFile: string; rel: string; localPath: string; status: "added" | "modified" }[] = [];
@@ -242,12 +222,10 @@ async function computePullDiffs(
   // Fetch VM content only for changed files
   const diffs: FileDiff[] = [];
   for (const file of changedFiles) {
-    const vmContent = await readVMFile(vmName, file.vmFile);
+    const vmContent = await readVMFile(targetVM, file.vmFile);
     if (vmContent === null) continue;
 
     if (isBinary(vmContent)) {
-      let exists = false;
-      try { statSync(file.localPath); exists = true; } catch {}
       diffs.push({
         relativePath: file.rel,
         oldContent: "",
@@ -266,6 +244,17 @@ async function computePullDiffs(
     }
   }
   return diffs;
+}
+
+async function collectVMFiles(targetVM: string, basePath: string): Promise<string[]> {
+  try {
+    const { stdout } = await multipass.runCommand(targetVM, [
+      "find", basePath, "-type", "f",
+    ]);
+    return stdout.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function displayDiffs(diffs: FileDiff[], direction: string): void {
@@ -308,23 +297,30 @@ function displayDiffs(diffs: FileDiff[], direction: string): void {
   console.log(chalk.bold(`${chalk.green(`++${totalAdded}`)} ${chalk.red(`--${totalRemoved}`)}`));
 }
 
-async function transferToAgent(
-  agent: string,
+async function transferToVM(
+  target: string,
   localPath: string,
   vmBasePath: string,
   isDir: boolean
 ): Promise<void> {
   if (isDir) {
-    await multipass.runCommand(agent, ["mkdir", "-p", vmBasePath]);
+    await multipass.runCommand(target, ["mkdir", "-p", vmBasePath]);
   } else {
     const parentDir = vmBasePath.substring(0, vmBasePath.lastIndexOf("/"));
-    await multipass.runCommand(agent, ["mkdir", "-p", parentDir]);
+    await multipass.runCommand(target, ["mkdir", "-p", parentDir]);
   }
-  await multipass.transfer(localPath, `${agent}:${vmBasePath}`, isDir);
+  await multipass.transfer(localPath, `${target}:${vmBasePath}`, isDir);
 }
 
-export async function syncPush(path: string): Promise<void> {
+export async function syncPush(vmStr: string, path: string): Promise<void> {
+  const index = parseInt(vmStr, 10);
+  if (isNaN(index) || index < 1) {
+    console.error(chalk.red("VM must be a positive number (e.g. 1, 2, 3)."));
+    process.exit(1);
+  }
+
   const project = getRepoName();
+  const name = vmName(index);
   const localPath = resolve(path);
 
   try {
@@ -335,21 +331,21 @@ export async function syncPush(path: string): Promise<void> {
   }
 
   await multipass.checkMultipass();
-  const agents = await findRunningAgents(project);
 
-  if (agents.length === 0) {
-    console.error(chalk.red("No running agent VMs found. Start agents first."));
+  const vms = await multipass.list();
+  const vm = vms.find((v) => v.name === name);
+  if (!vm || vm.state !== "Running") {
+    console.error(chalk.red(`VM ${name} is not running.`));
     process.exit(1);
   }
-
-  console.log(chalk.bold(`Pushing to ${agents.length} agent(s)...\n`));
 
   const cwd = resolve(".");
   const relPath = relative(cwd, localPath);
   const vmBasePath = `/home/ubuntu/${project}/${relPath}`;
 
-  // Show diffs against first agent (they should all be similar)
-  const diffs = await computePushDiffs(localPath, agents[0], vmBasePath);
+  console.log(chalk.bold(`Pushing to ${name}...\n`));
+
+  const diffs = await computePushDiffs(localPath, name, vmBasePath);
 
   if (diffs.length === 0) {
     console.log(chalk.green("Already in sync — no changes to transfer."));
@@ -361,7 +357,7 @@ export async function syncPush(path: string): Promise<void> {
   const hasOverwrites = diffs.some((d) => d.status === "modified");
   if (hasOverwrites) {
     const ok = await confirm(
-      chalk.yellow(`This will overwrite files on ${agents.length} agent(s). Proceed?`)
+      chalk.yellow(`This will overwrite files on ${name}. Proceed?`)
     );
     if (!ok) {
       console.log("Aborted.");
@@ -369,44 +365,42 @@ export async function syncPush(path: string): Promise<void> {
     }
   }
 
-  // Transfer to all agents in parallel
   const isDir = statSync(localPath).isDirectory();
-  console.log(`Syncing to ${agents.length} agent(s)...`);
-  await Promise.all(agents.map((agent) => transferToAgent(agent, localPath, vmBasePath, isDir)));
+  await transferToVM(name, localPath, vmBasePath, isDir);
 
-  console.log(chalk.green(`\nPushed to ${agents.length} agent(s).`));
+  console.log(chalk.green(`\nPushed to ${name}.`));
 }
 
-export async function syncPull(agentStr: string, path: string): Promise<void> {
-  const project = getRepoName();
-  const agentIndex = parseInt(agentStr, 10);
-
-  if (isNaN(agentIndex) || agentIndex < 1) {
-    console.error(chalk.red("Agent must be a positive number (e.g. 1, 2, 3)."));
+export async function syncPull(vmStr: string, path: string): Promise<void> {
+  const index = parseInt(vmStr, 10);
+  if (isNaN(index) || index < 1) {
+    console.error(chalk.red("VM must be a positive number (e.g. 1, 2, 3)."));
     process.exit(1);
   }
 
-  await multipass.checkMultipass();
-  const vmName = agentVMName(project, agentIndex);
-  const vms = await multipass.list();
-  const vm = vms.find((v) => v.name === vmName);
+  const project = getRepoName();
+  const name = vmName(index);
 
+  await multipass.checkMultipass();
+
+  const vms = await multipass.list();
+  const vm = vms.find((v) => v.name === name);
   if (!vm || vm.state !== "Running") {
-    console.error(chalk.red(`Agent ${agentIndex} is not running.`));
+    console.error(chalk.red(`VM ${name} is not running.`));
     process.exit(1);
   }
 
   const vmPath = `/home/ubuntu/${project}/${path}`;
   const localPath = resolve(path);
 
-  if (!(await vmPathExists(vmName, vmPath))) {
-    console.error(chalk.red(`Path not found on agent ${agentIndex}: ${vmPath}`));
+  if (!(await vmPathExists(name, vmPath))) {
+    console.error(chalk.red(`Path not found on ${name}: ${vmPath}`));
     process.exit(1);
   }
 
-  console.log(chalk.bold(`Pulling from agent ${agentIndex}...\n`));
+  console.log(chalk.bold(`Pulling from ${name}...\n`));
 
-  const diffs = await computePullDiffs(vmName, vmPath, localPath);
+  const diffs = await computePullDiffs(name, vmPath, localPath);
 
   if (diffs.length === 0) {
     console.log(chalk.green("Already in sync — no changes to transfer."));
@@ -426,12 +420,12 @@ export async function syncPull(agentStr: string, path: string): Promise<void> {
     }
   }
 
-  const isDir = await vmIsDirectory(vmName, vmPath);
+  const isDir = await vmIsDirectory(name, vmPath);
   if (isDir) {
     const { mkdirSync } = await import("node:fs");
     mkdirSync(localPath, { recursive: true });
   }
-  await multipass.transfer(`${vmName}:${vmPath}`, localPath, isDir);
+  await multipass.transfer(`${name}:${vmPath}`, localPath, isDir);
 
-  console.log(chalk.green(`\nPulled from agent ${agentIndex}.`));
+  console.log(chalk.green(`\nPulled from ${name}.`));
 }

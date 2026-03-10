@@ -1,44 +1,60 @@
 import chalk from "chalk";
-import { execFileSync } from "node:child_process";
 import * as multipass from "../multipass.js";
-import { getRepoName, agentVMName } from "../project.js";
+import { vmName } from "../project.js";
+import { getHostedAgent, unhostAgent } from "../networking.js";
 
-async function findAgentVMs(project: string): Promise<{ name: string; state: string }[]> {
-  const prefix = agentVMName(project, 0).replace(/0$/, "");
+async function findAllAgentVMs(): Promise<{ name: string; state: string }[]> {
   const vms = await multipass.list();
-  return vms.filter((vm) => vm.name.startsWith(prefix));
+  return vms.filter((vm) => /^agent-tool-\d+$/.test(vm.name));
 }
 
-export async function stop(): Promise<void> {
-  const project = getRepoName();
-  const sessionName = `agent-tool-${project}`;
-
+export async function stop(vmNumbers: string[]): Promise<void> {
   await multipass.checkMultipass();
 
-  // Kill tmux session
-  try {
-    execFileSync("tmux", ["kill-session", "-t", sessionName], { stdio: "ignore" });
-    console.log(`Killed tmux session "${sessionName}".`);
-  } catch {
-    // No session running
+  let targets: string[];
+
+  if (vmNumbers.length === 0) {
+    // Stop all running agent-tool VMs
+    const agents = await findAllAgentVMs();
+    const running = agents.filter((vm) => vm.state === "Running");
+    if (running.length === 0) {
+      console.log("No running VMs to stop.");
+      return;
+    }
+    targets = running.map((vm) => vm.name);
+  } else {
+    targets = vmNumbers.map((n) => {
+      const index = parseInt(n, 10);
+      if (isNaN(index) || index < 1) {
+        console.error(chalk.red(`Invalid VM number: ${n}`));
+        process.exit(1);
+      }
+      return vmName(index);
+    });
   }
 
-  // Find and stop agent VMs
-  const agents = await findAgentVMs(project);
-  if (agents.length === 0) {
-    console.log("No agent VMs found.");
-    return;
+  // Clean up localhost forwarding if a hosted VM is being stopped
+  const hosted = getHostedAgent();
+  if (hosted && targets.includes(hosted.vmName)) {
+    await unhostAgent();
   }
 
-  const running = agents.filter((vm) => vm.state === "Running");
-  const stopped = agents.filter((vm) => vm.state !== "Running");
-  for (const vm of stopped) {
-    console.log(`${vm.name} already stopped.`);
-  }
-  if (running.length > 0) {
-    console.log(`Stopping ${running.map((vm) => vm.name).join(", ")}...`);
-    await Promise.all(running.map((vm) => multipass.stop(vm.name)));
-  }
+  console.log(chalk.bold(`Stopping ${targets.length} VM(s)...\n`));
 
-  console.log(chalk.green(`\nStopped ${agents.length} agent(s). Run "agent-tool start" to resume.`));
+  await Promise.all(
+    targets.map(async (name) => {
+      const vms = await multipass.list();
+      const vm = vms.find((v) => v.name === name);
+      if (!vm) {
+        console.log(chalk.yellow(`  ${name}: not found`));
+        return;
+      }
+      if (vm.state !== "Running") {
+        console.log(`  ${name}: already stopped`);
+      } else {
+        await multipass.stop(name);
+        console.log(chalk.green(`  ${name}: stopped`));
+      }
+    })
+  );
 }

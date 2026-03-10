@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agent-tool</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-deepest: #0a0a0b;
+    --bg-deep: #0f1014;
+    --bg-surface: #141519;
+    --bg-raised: #1a1b22;
+    --bg-hover: #22232d;
+    --border: #2a2b35;
+    --border-subtle: #1e1f28;
+    --text-primary: #c8cad0;
+    --text-secondary: #6e7179;
+    --text-muted: #44464f;
+    --accent-green: #3dd68c;
+    --accent-green-dim: #1a3d2a;
+    --accent-blue: #5b9bf5;
+    --accent-orange: #e5a64e;
+    --accent-red: #e55a5a;
+    --accent-cyan: #4ec9b0;
+    --accent-purple: #b48ead;
+    --terminal-bg: #0c0c0e;
+    --terminal-cursor: #c8cad0;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg-deepest);
+    color: var(--text-primary);
+    font-family: 'IBM Plex Mono', monospace;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  /* ── Title bar ── */
+  .titlebar {
+    height: 32px;
+    background: var(--bg-deep);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    -webkit-app-region: drag;
+    flex-shrink: 0;
+  }
+
+  .titlebar-dots { display: flex; gap: 6px; }
+  .titlebar-dot { width: 10px; height: 10px; border-radius: 50%; opacity: 0.8; }
+  .titlebar-dot.red { background: #e55a5a; }
+  .titlebar-dot.yellow { background: #e5a64e; }
+  .titlebar-dot.green { background: #3dd68c; }
+  .titlebar-text { flex: 1; text-align: center; font-size: 11px; color: var(--text-secondary); letter-spacing: 0.5px; }
+
+  /* ── VM Tab bar ── */
+  .tabbar {
+    display: flex;
+    align-items: stretch;
+    background: var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    height: 36px;
+  }
+
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 16px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-right: 1px solid var(--border-subtle);
+    position: relative;
+    transition: background 0.12s, color 0.12s;
+    user-select: none;
+  }
+
+  .tab:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .tab.active { background: var(--bg-surface); color: var(--text-primary); }
+  .tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px; left: 0; right: 0;
+    height: 1px;
+    background: var(--bg-surface);
+  }
+
+  .tab-indicator { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .tab-indicator.running { background: var(--accent-green); box-shadow: 0 0 4px var(--accent-green-dim); }
+  .tab-indicator.stopped { background: var(--text-muted); }
+  .tab-label { letter-spacing: 0.3px; }
+  .tab-project { font-size: 10px; color: var(--text-muted); margin-left: -2px; }
+  .tab-hosted { font-size: 9px; color: var(--accent-cyan); letter-spacing: 0.5px; margin-left: 2px; }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    padding: 0 8px;
+    height: 34px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .toolbar-group { display: flex; align-items: center; gap: 1px; }
+
+  .toolbar-sep {
+    width: 1px; height: 18px;
+    background: var(--border);
+    margin: 0 8px;
+  }
+
+  .toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.12s;
+    user-select: none;
+    letter-spacing: 0.2px;
+  }
+
+  .toolbar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-color: var(--border); }
+  .toolbar-btn:active { background: var(--bg-raised); }
+  .toolbar-btn.active-host { color: var(--accent-cyan); border-color: var(--accent-cyan); background: rgba(78, 201, 176, 0.06); }
+  .toolbar-btn.active-host:hover { background: rgba(78, 201, 176, 0.1); }
+  .toolbar-btn.danger:hover { color: var(--accent-red); border-color: var(--accent-red); background: rgba(229, 90, 90, 0.06); }
+  .toolbar-btn.start:hover { color: var(--accent-green); border-color: var(--accent-green); background: rgba(61, 214, 140, 0.06); }
+  .toolbar-btn svg { width: 12px; height: 12px; fill: currentColor; }
+
+  .toolbar-context {
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    letter-spacing: 0.2px;
+    margin-left: 4px;
+  }
+
+  .context-project { color: var(--accent-blue); }
+  .context-sep { color: var(--text-muted); margin: 0 1px; }
+  .context-branch { color: var(--accent-green); }
+
+  .toolbar-status {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    letter-spacing: 0.3px;
+  }
+
+  .toolbar-status .ip { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .toolbar-status .state { color: var(--accent-green); font-weight: 500; }
+  .toolbar-status .state.stopped { color: var(--text-muted); }
+
+  /* ── Main terminal area (terminal + sidebar) ── */
+  .terminal-wrapper {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+
+  .terminal-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--terminal-bg);
+    min-width: 0;
+  }
+
+  .terminal-content {
+    flex: 1;
+    padding: 10px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .terminal-content::-webkit-scrollbar { width: 6px; }
+  .terminal-content::-webkit-scrollbar-track { background: transparent; }
+  .terminal-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Terminal text styling */
+  .t-prompt { color: var(--accent-blue); }
+  .t-path { color: var(--accent-cyan); }
+  .t-cmd { color: var(--text-primary); }
+  .t-output { color: var(--text-secondary); }
+  .t-muted { color: var(--text-muted); }
+  .t-green { color: var(--accent-green); }
+  .t-orange { color: var(--accent-orange); }
+  .t-purple { color: var(--accent-purple); }
+  .t-red { color: var(--accent-red); }
+  .t-bold { font-weight: 600; }
+
+  .cursor-block {
+    display: inline-block;
+    width: 7px; height: 15px;
+    background: var(--terminal-cursor);
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── Terminal sidebar (right) ── */
+  .terminal-sidebar {
+    width: 38px;
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 0;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .term-tab {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.1s;
+    position: relative;
+    border: 1px solid transparent;
+  }
+
+  .term-tab:hover {
+    background: var(--bg-hover);
+  }
+
+  .term-tab.active {
+    background: var(--bg-raised);
+    border-color: var(--border);
+  }
+
+  .term-tab .term-icon {
+    width: 14px;
+    height: 14px;
+    fill: var(--text-muted);
+  }
+
+  .term-tab.active .term-icon {
+    fill: var(--text-primary);
+  }
+
+  .term-tab:hover .term-icon {
+    fill: var(--text-secondary);
+  }
+
+  .term-tab .term-label {
+    position: absolute;
+    right: calc(100% + 6px);
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 3px 7px;
+    font-size: 10px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s;
+    z-index: 10;
+  }
+
+  .term-tab:hover .term-label {
+    opacity: 1;
+  }
+
+  .term-sidebar-sep {
+    width: 20px;
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 4px 0;
+  }
+
+  .term-add-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.1s;
+    border: none;
+    background: transparent;
+  }
+
+  .term-add-btn:hover {
+    background: var(--bg-hover);
+  }
+
+  .term-add-btn svg {
+    width: 12px;
+    height: 12px;
+    stroke: var(--text-muted);
+    fill: none;
+  }
+
+  .term-add-btn:hover svg {
+    stroke: var(--accent-green);
+  }
+
+  .term-close-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.1s;
+    border: none;
+    background: transparent;
+  }
+
+  .term-close-btn:hover {
+    background: var(--bg-hover);
+  }
+
+  .term-close-btn svg {
+    width: 10px;
+    height: 10px;
+    stroke: var(--text-muted);
+    fill: none;
+  }
+
+  .term-close-btn:hover svg {
+    stroke: var(--accent-red);
+  }
+
+  /* ── Terminal pane (single, inside terminal-main) ── */
+  .term-pane {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .term-pane.active {
+    display: flex;
+  }
+
+  /* ── Status bar (bottom) ── */
+  .statusbar {
+    height: 22px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    background: var(--bg-deep);
+    border-top: 1px solid var(--border-subtle);
+    font-size: 10px;
+    color: var(--text-muted);
+    gap: 16px;
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+  }
+
+  .statusbar-item { display: flex; align-items: center; gap: 4px; }
+  .statusbar .hosted-label { color: var(--accent-cyan); }
+
+  /* ── Hidden tab content ── */
+  .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .tab-content.active { display: flex; }
+
+  /* ── Overlay (stopped / project picker) ── */
+  .overlay {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: var(--terminal-bg);
+  }
+
+  .overlay .overlay-label { font-size: 13px; color: var(--text-muted); letter-spacing: 0.5px; }
+
+  .overlay .open-btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 8px 20px;
+    background: transparent;
+    color: var(--accent-blue);
+    border: 1px solid var(--accent-blue);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.12s;
+    letter-spacing: 0.3px;
+  }
+
+  .overlay .open-btn:hover { background: rgba(91, 155, 245, 0.08); }
+
+  .project-picker { width: 360px; max-width: 80%; }
+  .project-picker-title { font-size: 11px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
+
+  .project-list { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
+  .project-list::-webkit-scrollbar { width: 4px; }
+  .project-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .project-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border: 1px solid transparent;
+  }
+
+  .project-item:hover { background: var(--bg-hover); border-color: var(--border); }
+  .project-item-info { display: flex; flex-direction: column; gap: 2px; }
+  .project-item-name { font-size: 12px; color: var(--text-primary); font-weight: 500; }
+  .project-item-path { font-size: 10px; color: var(--text-muted); }
+  .project-item-action { font-size: 10px; color: var(--accent-blue); opacity: 0; transition: opacity 0.1s; }
+  .project-item:hover .project-item-action { opacity: 1; }
+
+  .project-add-row { margin-top: 6px; }
+
+  .project-add-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 10px;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+
+  .project-add-btn:hover { border-color: var(--text-muted); color: var(--text-primary); background: var(--bg-hover); }
+  .project-add-btn svg { width: 12px; height: 12px; fill: currentColor; }
+
+  /* ── Modal overlay ── */
+  .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: var(--bg-raised); border: 1px solid var(--border); border-radius: 6px; width: 440px; max-width: 90vw; box-shadow: 0 16px 48px rgba(0,0,0,0.4); }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); }
+  .modal-title { font-size: 12px; font-weight: 600; letter-spacing: 0.3px; }
+  .modal-close { background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .modal-close:hover { color: var(--text-primary); }
+  .modal-body { padding: 16px; }
+  .modal-footer { padding: 12px 16px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: flex-end; gap: 8px; }
+  .modal-btn { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 500; padding: 5px 14px; border-radius: 3px; cursor: pointer; transition: all 0.12s; letter-spacing: 0.2px; }
+  .modal-btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); }
+  .modal-btn.ghost:hover { color: var(--text-primary); border-color: var(--text-muted); }
+  .modal-btn.primary { background: var(--accent-blue); border: 1px solid var(--accent-blue); color: #0a0a0b; }
+  .modal-btn.primary:hover { background: #6da8f7; }
+  .modal-btn.warn { background: var(--accent-orange); border: 1px solid var(--accent-orange); color: #0a0a0b; }
+
+  /* ── Sync modal ── */
+  .sync-dropzone { border: 1px dashed var(--border); border-radius: 4px; padding: 24px; text-align: center; cursor: pointer; transition: all 0.15s; }
+  .sync-dropzone:hover { border-color: var(--text-muted); background: var(--bg-hover); }
+  .sync-dropzone-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+  .sync-dropzone-hint { font-size: 10px; color: var(--text-muted); }
+  .sync-selection { display: none; margin-top: 12px; padding: 10px 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; }
+  .sync-selection.visible { display: block; }
+  .sync-file-row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
+  .sync-file-name { color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
+  .sync-file-name svg { width: 12px; height: 12px; fill: var(--text-muted); }
+  .sync-file-size { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .sync-dest { font-size: 10px; color: var(--text-muted); margin-top: 6px; }
+  .sync-dest span { color: var(--accent-cyan); }
+  .sync-warning { display: none; margin-top: 10px; padding: 8px 10px; background: rgba(229,166,78,0.08); border: 1px solid rgba(229,166,78,0.25); border-radius: 4px; font-size: 11px; color: var(--accent-orange); }
+  .sync-warning.visible { display: block; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="titlebar">
+    <div class="titlebar-dots">
+      <div class="titlebar-dot red"></div>
+      <div class="titlebar-dot yellow"></div>
+      <div class="titlebar-dot green"></div>
+    </div>
+    <div class="titlebar-text">agent-tool</div>
+    <div style="width: 48px"></div>
+  </div>
+
+  <div class="tabbar" id="tabbar">
+    <div class="tab active" data-vm="1" onclick="switchTab(1)">
+      <div class="tab-indicator running"></div>
+      <span class="tab-label">VM 1</span>
+      <span class="tab-project" id="tab-project-1">my-project</span>
+      <span class="tab-hosted" id="tab-hosted-1">HOST</span>
+    </div>
+    <div class="tab" data-vm="2" onclick="switchTab(2)">
+      <div class="tab-indicator running"></div>
+      <span class="tab-label">VM 2</span>
+      <span class="tab-project" id="tab-project-2">my-project</span>
+      <span class="tab-hosted" id="tab-hosted-2" style="display:none">HOST</span>
+    </div>
+    <div class="tab" data-vm="3" onclick="switchTab(3)">
+      <div class="tab-indicator stopped"></div>
+      <span class="tab-label">VM 3</span>
+      <span class="tab-project" id="tab-project-3"></span>
+      <span class="tab-hosted" id="tab-hosted-3" style="display:none">HOST</span>
+    </div>
+  </div>
+
+  <!-- ════ VM 1 ════ -->
+  <div class="tab-content active" id="content-1">
+    <div class="toolbar" id="toolbar-1">
+      <div class="toolbar-group">
+        <button class="toolbar-btn active-host" id="host-btn-1" onclick="toggleHost(1)">
+          <svg viewBox="0 0 16 16"><path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm1 0v5h10V3H3zm-1 9a1 1 0 011-1h10a1 1 0 110 2H3a1 1 0 01-1-1z"/></svg>
+          hosted
+        </button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn danger" onclick="stopVM(1)"><svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1"/></svg> stop</button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" onclick="openSyncModal(1)"><svg viewBox="0 0 16 16"><path d="M8 2l4 4H9v6H7V6H4l4-4z"/></svg> sync</button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" onclick="switchProject(1)"><svg viewBox="0 0 16 16"><path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z"/></svg> switch project</button>
+      </div>
+      <div class="toolbar-context" id="toolbar-context-1">
+        <span class="context-project">my-project</span><span class="context-sep">:</span><span class="context-branch">feat/auth-middleware</span>
+      </div>
+      <div class="toolbar-status">
+        <span class="state">running</span>
+        <span class="ip">10.75.123.41</span>
+      </div>
+    </div>
+
+    <div class="terminal-wrapper" id="terminals-1">
+      <div class="terminal-main">
+        <!-- Terminal panes (one visible at a time) -->
+        <div class="term-pane active" id="vm1-term-0">
+          <div class="terminal-content"><span class="t-muted">ubuntu@agent-tool-1:~/my-project$</span> <span class="t-cmd">claude</span>
+
+<span class="t-purple t-bold"> ╭────────────────────────────────────╮</span>
+<span class="t-purple t-bold"> │</span>  <span class="t-bold">Claude Code</span> <span class="t-muted">v1.0.32</span>              <span class="t-purple t-bold">│</span>
+<span class="t-purple t-bold"> │</span>                                    <span class="t-purple t-bold">│</span>
+<span class="t-purple t-bold"> │</span>  <span class="t-muted">/help for commands</span>               <span class="t-purple t-bold">│</span>
+<span class="t-purple t-bold"> ╰────────────────────────────────────╯</span>
+
+<span class="t-muted">cwd:</span> <span class="t-path">/home/ubuntu/my-project</span>
+
+<span class="t-orange t-bold">  ></span> <span class="t-cmd">Add the new authentication middleware</span>
+<span class="t-output">
+  I'll add authentication middleware to the Express
+  app. Let me start by reading the existing route
+  structure.</span>
+
+<span class="t-green">  ✓</span> <span class="t-muted">Read src/routes/index.ts</span>
+<span class="t-green">  ✓</span> <span class="t-muted">Read src/middleware/cors.ts</span>
+<span class="t-muted">  ⠋ Writing src/middleware/auth.ts...</span>
+
+</div>
+        </div>
+
+        <div class="term-pane" id="vm1-term-1">
+          <div class="terminal-content"><span class="t-muted">ubuntu@agent-tool-1:~/my-project$</span> <span class="t-cmd">npm run dev</span>
+<span class="t-output">
+  <span class="t-muted">vite v6.2.0</span> dev server running at:
+
+  <span class="t-green">➜</span>  Local:   <span class="t-path">http://localhost:5173/</span>
+  <span class="t-muted">➜</span>  Network: <span class="t-muted">http://10.75.123.41:5173/</span>
+</span>
+<span class="t-muted">ubuntu@agent-tool-1:~/my-project$</span> <span class="cursor-block"></span>
+</div>
+        </div>
+
+        <div class="term-pane" id="vm1-term-2">
+          <div class="terminal-content"><span class="t-muted">ubuntu@agent-tool-1:~/my-project$</span> <span class="t-cmd">git log --oneline -5</span>
+<span class="t-orange">c4f82a1</span><span class="t-output"> Add auth middleware skeleton</span>
+<span class="t-orange">91b3e07</span><span class="t-output"> Update route types</span>
+<span class="t-orange">3da10f2</span><span class="t-output"> Add CORS middleware</span>
+<span class="t-orange">a8c4501</span><span class="t-output"> Initial Express setup</span>
+<span class="t-orange">f0012ab</span><span class="t-output"> Init project</span>
+
+<span class="t-muted">ubuntu@agent-tool-1:~/my-project$</span> <span class="cursor-block"></span>
+</div>
+        </div>
+      </div>
+
+      <!-- Terminal sidebar -->
+      <div class="terminal-sidebar" id="sidebar-1">
+        <div class="term-tab active" data-term="0" onclick="switchTerm(1, 0)">
+          <svg class="term-icon" viewBox="0 0 16 16"><path d="M2 3h12v10H2V3zm1 2l3 2.5L3 10V5zm4 5h5v1H7v-1z"/></svg>
+          <span class="term-label">claude code</span>
+        </div>
+        <div class="term-tab" data-term="1" onclick="switchTerm(1, 1)">
+          <svg class="term-icon" viewBox="0 0 16 16"><path d="M2 3h12v10H2V3zm1 2l3 2.5L3 10V5zm4 5h5v1H7v-1z"/></svg>
+          <span class="term-label">dev server</span>
+        </div>
+        <div class="term-tab" data-term="2" onclick="switchTerm(1, 2)">
+          <svg class="term-icon" viewBox="0 0 16 16"><path d="M2 3h12v10H2V3zm1 2l3 2.5L3 10V5zm4 5h5v1H7v-1z"/></svg>
+          <span class="term-label">shell</span>
+        </div>
+        <div class="term-sidebar-sep"></div>
+        <button class="term-add-btn" onclick="addTerm(1)" title="New terminal">
+          <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <button class="term-close-btn" onclick="closeTerm(1)" title="Close terminal">
+          <svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="overlay" id="picker-1" style="display:none">
+      <span class="overlay-label">Switch project on agent-tool-1</span>
+      <div class="project-picker">
+        <div class="project-list">
+          <div class="project-item" onclick="selectProject(1, 'my-project', '/home/ben/code/my-project')"><div class="project-item-info"><span class="project-item-name">my-project</span><span class="project-item-path">~/code/my-project</span></div><span class="project-item-action">open →</span></div>
+          <div class="project-item" onclick="selectProject(1, 'api-server', '/home/ben/code/api-server')"><div class="project-item-info"><span class="project-item-name">api-server</span><span class="project-item-path">~/code/api-server</span></div><span class="project-item-action">open →</span></div>
+          <div class="project-item" onclick="selectProject(1, 'landing-page', '/home/ben/code/landing-page')"><div class="project-item-info"><span class="project-item-name">landing-page</span><span class="project-item-path">~/code/landing-page</span></div><span class="project-item-action">open →</span></div>
+        </div>
+        <div class="project-add-row"><button class="project-add-btn" onclick="addNewProject()"><svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg> Add project folder</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ VM 2 ════ -->
+  <div class="tab-content" id="content-2">
+    <div class="toolbar" id="toolbar-2">
+      <div class="toolbar-group">
+        <button class="toolbar-btn" id="host-btn-2" onclick="toggleHost(2)"><svg viewBox="0 0 16 16"><path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm1 0v5h10V3H3zm-1 9a1 1 0 011-1h10a1 1 0 110 2H3a1 1 0 01-1-1z"/></svg> host</button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn danger" onclick="stopVM(2)"><svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1"/></svg> stop</button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" onclick="openSyncModal(2)"><svg viewBox="0 0 16 16"><path d="M8 2l4 4H9v6H7V6H4l4-4z"/></svg> sync</button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" onclick="switchProject(2)"><svg viewBox="0 0 16 16"><path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z"/></svg> switch project</button>
+      </div>
+      <div class="toolbar-context" id="toolbar-context-2">
+        <span class="context-project">my-project</span><span class="context-sep">:</span><span class="context-branch">refactor/db-pooling</span>
+      </div>
+      <div class="toolbar-status">
+        <span class="state">running</span>
+        <span class="ip">10.75.123.42</span>
+      </div>
+    </div>
+
+    <div class="terminal-wrapper" id="terminals-2">
+      <div class="terminal-main">
+        <div class="term-pane active" id="vm2-term-0">
+          <div class="terminal-content"><span class="t-muted">ubuntu@agent-tool-2:~/my-project$</span> <span class="t-cmd">claude</span>
+
+<span class="t-purple t-bold"> ╭────────────────────────────────────╮</span>
+<span class="t-purple t-bold"> │</span>  <span class="t-bold">Claude Code</span> <span class="t-muted">v1.0.32</span>              <span class="t-purple t-bold">│</span>
+<span class="t-purple t-bold"> │</span>                                    <span class="t-purple t-bold">│</span>
+<span class="t-purple t-bold"> │</span>  <span class="t-muted">/help for commands</span>               <span class="t-purple t-bold">│</span>
+<span class="t-purple t-bold"> ╰────────────────────────────────────╯</span>
+
+<span class="t-muted">cwd:</span> <span class="t-path">/home/ubuntu/my-project</span>
+
+<span class="t-orange t-bold">  ></span> <span class="t-cmd">Refactor the database layer to use connection pooling</span>
+<span class="t-output">
+  I'll refactor the database layer. Let me first
+  understand the current implementation.</span>
+
+<span class="t-green">  ✓</span> <span class="t-muted">Read src/db/connection.ts</span>
+<span class="t-green">  ✓</span> <span class="t-muted">Read src/db/queries.ts</span>
+<span class="t-green">  ✓</span> <span class="t-muted">Read src/db/migrations/</span>
+<span class="t-green">  ✓</span> <span class="t-muted">Wrote src/db/pool.ts</span>
+
+<span class="t-muted">  ⠋ Editing src/db/queries.ts...</span>
+
+</div>
+        </div>
+
+        <div class="term-pane" id="vm2-term-1">
+          <div class="terminal-content"><span class="t-muted">ubuntu@agent-tool-2:~/my-project$</span> <span class="t-cmd">git log --oneline -3</span>
+<span class="t-orange">a3f21b4</span><span class="t-output"> Add pool configuration defaults</span>
+<span class="t-orange">8c1e093</span><span class="t-output"> Extract connection factory</span>
+<span class="t-orange">f01ab32</span><span class="t-output"> Initial db refactor setup</span>
+
+<span class="t-muted">ubuntu@agent-tool-2:~/my-project$</span> <span class="cursor-block"></span>
+</div>
+        </div>
+      </div>
+
+      <div class="terminal-sidebar" id="sidebar-2">
+        <div class="term-tab active" data-term="0" onclick="switchTerm(2, 0)">
+          <svg class="term-icon" viewBox="0 0 16 16"><path d="M2 3h12v10H2V3zm1 2l3 2.5L3 10V5zm4 5h5v1H7v-1z"/></svg>
+          <span class="term-label">claude code</span>
+        </div>
+        <div class="term-tab" data-term="1" onclick="switchTerm(2, 1)">
+          <svg class="term-icon" viewBox="0 0 16 16"><path d="M2 3h12v10H2V3zm1 2l3 2.5L3 10V5zm4 5h5v1H7v-1z"/></svg>
+          <span class="term-label">shell</span>
+        </div>
+        <div class="term-sidebar-sep"></div>
+        <button class="term-add-btn" onclick="addTerm(2)" title="New terminal">
+          <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+        <button class="term-close-btn" onclick="closeTerm(2)" title="Close terminal">
+          <svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="overlay" id="picker-2" style="display:none">
+      <span class="overlay-label">Switch project on agent-tool-2</span>
+      <div class="project-picker">
+        <div class="project-list">
+          <div class="project-item" onclick="selectProject(2, 'my-project', '/home/ben/code/my-project')"><div class="project-item-info"><span class="project-item-name">my-project</span><span class="project-item-path">~/code/my-project</span></div><span class="project-item-action">open →</span></div>
+          <div class="project-item" onclick="selectProject(2, 'api-server', '/home/ben/code/api-server')"><div class="project-item-info"><span class="project-item-name">api-server</span><span class="project-item-path">~/code/api-server</span></div><span class="project-item-action">open →</span></div>
+          <div class="project-item" onclick="selectProject(2, 'landing-page', '/home/ben/code/landing-page')"><div class="project-item-info"><span class="project-item-name">landing-page</span><span class="project-item-path">~/code/landing-page</span></div><span class="project-item-action">open →</span></div>
+        </div>
+        <div class="project-add-row"><button class="project-add-btn" onclick="addNewProject()"><svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg> Add project folder</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ VM 3 (stopped) ════ -->
+  <div class="tab-content" id="content-3">
+    <div class="toolbar" id="toolbar-3">
+      <div class="toolbar-group">
+        <button class="toolbar-btn" id="host-btn-3" style="opacity:0.3;pointer-events:none"><svg viewBox="0 0 16 16"><path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm1 0v5h10V3H3zm-1 9a1 1 0 011-1h10a1 1 0 110 2H3a1 1 0 01-1-1z"/></svg> host</button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn start" onclick="startVM(3)"><svg viewBox="0 0 16 16"><path d="M4 2l10 6-10 6V2z"/></svg> start</button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" style="opacity:0.3;pointer-events:none"><svg viewBox="0 0 16 16"><path d="M8 2l4 4H9v6H7V6H4l4-4z"/></svg> sync</button>
+      </div>
+      <div class="toolbar-context" id="toolbar-context-3">
+        <span class="context-project" style="color: var(--text-muted)">no project</span>
+      </div>
+      <div class="toolbar-status">
+        <span class="state stopped">stopped</span>
+        <span class="ip">—</span>
+      </div>
+    </div>
+
+    <div class="terminal-wrapper" id="terminals-3" style="display:none"></div>
+
+    <div class="overlay" id="picker-3">
+      <span class="overlay-label">agent-tool-3 is stopped</span>
+      <button class="open-btn" onclick="openProject(3)">open project</button>
+      <div class="project-picker" id="project-picker-3" style="display:none">
+        <div class="project-picker-title">select a project</div>
+        <div class="project-list">
+          <div class="project-item" onclick="selectProject(3, 'my-project', '/home/ben/code/my-project')"><div class="project-item-info"><span class="project-item-name">my-project</span><span class="project-item-path">~/code/my-project</span></div><span class="project-item-action">setup →</span></div>
+          <div class="project-item" onclick="selectProject(3, 'api-server', '/home/ben/code/api-server')"><div class="project-item-info"><span class="project-item-name">api-server</span><span class="project-item-path">~/code/api-server</span></div><span class="project-item-action">setup →</span></div>
+          <div class="project-item" onclick="selectProject(3, 'landing-page', '/home/ben/code/landing-page')"><div class="project-item-info"><span class="project-item-name">landing-page</span><span class="project-item-path">~/code/landing-page</span></div><span class="project-item-action">setup →</span></div>
+        </div>
+        <div class="project-add-row"><button class="project-add-btn" onclick="addNewProject()"><svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg> Add project folder</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span class="statusbar-item">3 VMs</span>
+    <span class="statusbar-item"><span class="hosted-label" id="statusbar-hosted">★ agent-tool-1 hosted</span></span>
+    <span class="statusbar-item" style="margin-left:auto">agent-tool v0.1.0</span>
+  </div>
+</div>
+
+<!-- ── Sync Modal ── -->
+<div class="modal-backdrop" id="sync-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Sync to <span id="sync-modal-vm">VM 1</span></span>
+      <button class="modal-close" onclick="closeSyncModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="sync-dropzone" onclick="simulateFilePick()">
+        <div class="sync-dropzone-label">Choose file or folder</div>
+        <div class="sync-dropzone-hint">Opens file explorer — syncs to same relative path on VM</div>
+      </div>
+      <div class="sync-selection" id="sync-selection">
+        <div class="sync-file-row">
+          <span class="sync-file-name"><svg viewBox="0 0 16 16"><path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" fill="currentColor"/></svg> <span id="sync-file-name-text">src/middleware</span></span>
+          <span class="sync-file-size" id="sync-file-size">12.4 KB</span>
+        </div>
+        <div class="sync-dest">→ <span id="sync-dest-path">/home/ubuntu/my-project/src/middleware</span></div>
+      </div>
+      <div class="sync-warning" id="sync-warning">⚠ Selection is <span id="sync-warning-size">1.2 GB</span> — this may take a while. Are you sure?</div>
+    </div>
+    <div class="modal-footer" id="sync-footer" style="display:none">
+      <button class="modal-btn ghost" onclick="closeSyncModal()">cancel</button>
+      <button class="modal-btn primary" id="sync-confirm-btn" onclick="confirmSync()">sync</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let activeTab = 1;
+  let hostedVM = 1;
+  let syncTargetVM = null;
+
+  // Track active terminal index per VM and terminal count
+  const vmTermState = {
+    1: { active: 0, count: 3, names: ['claude code', 'dev server', 'shell'] },
+    2: { active: 0, count: 2, names: ['claude code', 'shell'] },
+    3: { active: 0, count: 0, names: [] },
+  };
+
+  const vmData = {
+    1: { running: true, ip: '10.75.123.41', project: 'my-project' },
+    2: { running: true, ip: '10.75.123.42', project: 'my-project' },
+    3: { running: false, ip: null, project: null },
+  };
+
+  const hostSvg = `<svg viewBox="0 0 16 16"><path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1V3zm1 0v5h10V3H3zm-1 9a1 1 0 011-1h10a1 1 0 110 2H3a1 1 0 01-1-1z"/></svg>`;
+  const termSvg = `<svg class="term-icon" viewBox="0 0 16 16"><path d="M2 3h12v10H2V3zm1 2l3 2.5L3 10V5zm4 5h5v1H7v-1z"/></svg>`;
+
+  function switchTab(vm) {
+    activeTab = vm;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.tab[data-vm="${vm}"]`).classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById(`content-${vm}`).classList.add('active');
+  }
+
+  function switchTerm(vm, idx) {
+    vmTermState[vm].active = idx;
+    // Update pane visibility
+    const main = document.querySelector(`#terminals-${vm} .terminal-main`);
+    if (!main) return;
+    main.querySelectorAll('.term-pane').forEach((p, i) => {
+      p.classList.toggle('active', i === idx);
+    });
+    // Update sidebar tabs
+    const sidebar = document.getElementById(`sidebar-${vm}`);
+    sidebar.querySelectorAll('.term-tab').forEach((t, i) => {
+      t.classList.toggle('active', i === idx);
+    });
+  }
+
+  function addTerm(vm) {
+    const state = vmTermState[vm];
+    const newIdx = state.count;
+    const name = `bash ${newIdx + 1}`;
+    state.names.push(name);
+    state.count++;
+
+    // Add pane
+    const main = document.querySelector(`#terminals-${vm} .terminal-main`);
+    const pane = document.createElement('div');
+    pane.className = 'term-pane';
+    pane.id = `vm${vm}-term-${newIdx}`;
+    pane.innerHTML = `<div class="terminal-content"><span class="t-muted">ubuntu@agent-tool-${vm}:~/my-project$</span> <span class="cursor-block"></span>\n</div>`;
+    main.appendChild(pane);
+
+    // Add sidebar tab (before the separator)
+    const sidebar = document.getElementById(`sidebar-${vm}`);
+    const sep = sidebar.querySelector('.term-sidebar-sep');
+    const tab = document.createElement('div');
+    tab.className = 'term-tab';
+    tab.dataset.term = newIdx;
+    tab.onclick = () => switchTerm(vm, newIdx);
+    tab.innerHTML = `${termSvg}<span class="term-label">${name}</span>`;
+    sidebar.insertBefore(tab, sep);
+
+    // Switch to the new terminal
+    switchTerm(vm, newIdx);
+  }
+
+  function closeTerm(vm) {
+    const state = vmTermState[vm];
+    if (state.count <= 1) return; // Don't close the last one
+
+    const idx = state.active;
+
+    // Remove pane
+    const pane = document.getElementById(`vm${vm}-term-${idx}`);
+    if (pane) pane.remove();
+
+    // Remove sidebar tab
+    const sidebar = document.getElementById(`sidebar-${vm}`);
+    const tabs = sidebar.querySelectorAll('.term-tab');
+    if (tabs[idx]) tabs[idx].remove();
+
+    // Update state
+    state.names.splice(idx, 1);
+    state.count--;
+
+    // Re-index remaining panes and tabs
+    const main = document.querySelector(`#terminals-${vm} .terminal-main`);
+    main.querySelectorAll('.term-pane').forEach((p, i) => {
+      p.id = `vm${vm}-term-${i}`;
+    });
+    sidebar.querySelectorAll('.term-tab').forEach((t, i) => {
+      t.dataset.term = i;
+      t.onclick = () => switchTerm(vm, i);
+      t.querySelector('.term-label').textContent = state.names[i];
+    });
+
+    // Switch to nearest terminal
+    const newActive = Math.min(idx, state.count - 1);
+    switchTerm(vm, newActive);
+  }
+
+  function toggleHost(vm) {
+    if (!vmData[vm].running) return;
+    if (hostedVM === vm) {
+      hostedVM = null;
+      document.getElementById(`host-btn-${vm}`).classList.remove('active-host');
+      document.getElementById(`host-btn-${vm}`).innerHTML = hostSvg + ' host';
+      document.getElementById(`tab-hosted-${vm}`).style.display = 'none';
+      document.getElementById('statusbar-hosted').textContent = '';
+    } else {
+      if (hostedVM) {
+        document.getElementById(`host-btn-${hostedVM}`).classList.remove('active-host');
+        document.getElementById(`host-btn-${hostedVM}`).innerHTML = hostSvg + ' host';
+        document.getElementById(`tab-hosted-${hostedVM}`).style.display = 'none';
+      }
+      hostedVM = vm;
+      document.getElementById(`host-btn-${vm}`).classList.add('active-host');
+      document.getElementById(`host-btn-${vm}`).innerHTML = hostSvg + ' hosted';
+      document.getElementById(`tab-hosted-${vm}`).style.display = 'inline';
+      document.getElementById('statusbar-hosted').textContent = `★ agent-tool-${vm} hosted`;
+    }
+  }
+
+  function startVM(vm) { alert(`Would run: agent-tool start ${vm}`); }
+  function stopVM(vm) { alert(`Would run: agent-tool stop ${vm}`); }
+
+  function switchProject(vm) {
+    document.getElementById(`terminals-${vm}`).style.display = 'none';
+    const picker = document.getElementById(`picker-${vm}`);
+    picker.style.display = '';
+    picker.querySelector('.overlay-label').textContent = `Switch project on agent-tool-${vm}`;
+  }
+
+  function openProject(vm) {
+    if (vmData[vm].project) {
+      alert(`Would run: agent-tool start ${vm}\nThen connect terminals to ~/` + vmData[vm].project);
+    } else {
+      document.getElementById(`project-picker-${vm}`).style.display = '';
+      document.querySelector(`#picker-${vm} .open-btn`).style.display = 'none';
+    }
+  }
+
+  function selectProject(vm, name, path) {
+    vmData[vm].project = name;
+    document.getElementById(`tab-project-${vm}`).textContent = name;
+    const ctx = document.getElementById(`toolbar-context-${vm}`);
+    ctx.innerHTML = `<span class="context-project">${name}</span><span class="context-sep">:</span><span class="context-branch">main</span>`;
+    document.getElementById(`terminals-${vm}`).style.display = '';
+    document.getElementById(`picker-${vm}`).style.display = 'none';
+    if (vmData[vm].running) {
+      alert(`Would run: cd ${path} && agent-tool setup ${vm}\nThen reconnect terminals to ~/${name}`);
+    } else {
+      alert(`Would run: cd ${path} && agent-tool setup ${vm}\nThen: agent-tool start ${vm}\nThen connect terminals to ~/${name}`);
+    }
+  }
+
+  function addNewProject() { alert('Would open native directory picker (dialog.showOpenDialog)'); }
+
+  // ── Sync modal ──
+  function openSyncModal(vm) {
+    syncTargetVM = vm;
+    document.getElementById('sync-modal-vm').textContent = `VM ${vm}`;
+    document.getElementById('sync-selection').classList.remove('visible');
+    document.getElementById('sync-warning').classList.remove('visible');
+    document.getElementById('sync-footer').style.display = 'none';
+    document.getElementById('sync-modal').classList.add('open');
+  }
+
+  function closeSyncModal() {
+    document.getElementById('sync-modal').classList.remove('open');
+    syncTargetVM = null;
+  }
+
+  function simulateFilePick() {
+    const isLarge = Math.random() > 0.5;
+    const project = vmData[syncTargetVM]?.project || 'my-project';
+    if (isLarge) {
+      document.getElementById('sync-file-name-text').textContent = 'node_modules';
+      document.getElementById('sync-file-size').textContent = '1.2 GB';
+      document.getElementById('sync-dest-path').textContent = `/home/ubuntu/${project}/node_modules`;
+      document.getElementById('sync-warning').classList.add('visible');
+      document.getElementById('sync-warning-size').textContent = '1.2 GB';
+      document.getElementById('sync-confirm-btn').className = 'modal-btn warn';
+      document.getElementById('sync-confirm-btn').textContent = 'sync anyway';
+    } else {
+      document.getElementById('sync-file-name-text').textContent = 'src/middleware';
+      document.getElementById('sync-file-size').textContent = '12.4 KB';
+      document.getElementById('sync-dest-path').textContent = `/home/ubuntu/${project}/src/middleware`;
+      document.getElementById('sync-warning').classList.remove('visible');
+      document.getElementById('sync-confirm-btn').className = 'modal-btn primary';
+      document.getElementById('sync-confirm-btn').textContent = 'sync';
+    }
+    document.getElementById('sync-selection').classList.add('visible');
+    document.getElementById('sync-footer').style.display = 'flex';
+  }
+
+  function confirmSync() {
+    const name = document.getElementById('sync-file-name-text').textContent;
+    alert(`Would run: agent-tool sync-push ${syncTargetVM} ${name}`);
+    closeSyncModal();
+  }
+
+  document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) backdrop.classList.remove('open');
+    });
+  });
+</script>
+
+</body>
+</html>

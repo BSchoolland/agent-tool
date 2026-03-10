@@ -1,58 +1,41 @@
 import chalk from "chalk";
 import * as multipass from "../multipass.js";
-import { getRepoName, projectVMName, agentVMName } from "../project.js";
+import { getHostedAgent } from "../networking.js";
 
 export async function status(): Promise<void> {
-  const project = getRepoName();
-  const projectVM = projectVMName(project);
-  const agentPrefix = agentVMName(project, 0).replace(/0$/, "");
-
   await multipass.checkMultipass();
 
   const vms = await multipass.list();
-  const agents = vms.filter((vm) => vm.name.startsWith(agentPrefix));
-
-  console.log(chalk.bold(`Project: ${project}\n`));
-
-  // Project VM status
-  const pvm = vms.find((vm) => vm.name === projectVM);
-  if (pvm) {
-    console.log(`  Project VM: ${pvm.state === "Running" ? chalk.green(pvm.state) : chalk.yellow(pvm.state)}`);
-  } else {
-    console.log(chalk.red("  Project VM: not found (run \"agent-tool init\")"));
-  }
+  const agents = vms
+    .filter((vm) => /^agent-tool-\d+$/.test(vm.name))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
   if (agents.length === 0) {
-    console.log("\n  No agent VMs found.");
+    console.log("No agent VMs found. Run \"agent-tool init\" to create some.");
     return;
   }
 
-  console.log(`\n  Agents: ${agents.length}\n`);
+  const hosted = getHostedAgent();
+
+  console.log(chalk.bold(`\n  VMs: ${agents.length}\n`));
   console.log(
-    `  ${"NAME".padEnd(40)} ${"STATE".padEnd(12)} ${"DEV SERVER".padEnd(24)} BRANCH`
+    `  ${"NAME".padEnd(24)} ${"STATE".padEnd(12)} IP`
   );
-  console.log(`  ${"─".repeat(40)} ${"─".repeat(12)} ${"─".repeat(24)} ${"─".repeat(20)}`);
+  console.log(`  ${"─".repeat(24)} ${"─".repeat(12)} ${"─".repeat(16)}`);
 
-  for (let i = 0; i < agents.length; i++) {
-    const vm = agents[i];
-    const agentIndex = i + 1;
-    let branch = "—";
-    if (vm.state === "Running") {
-      try {
-        const { stdout } = await multipass.runCommand(vm.name, [
-          "sudo", "-u", "ubuntu", "bash", "-lc",
-          `cd /home/ubuntu/${project} && git branch --show-current`,
-        ]);
-        branch = stdout.trim() || "—";
-      } catch {
-        // Can't get branch
-      }
-    }
-
-    const stateColor = vm.state === "Running" ? chalk.green : chalk.yellow;
-    const devServer = vm.state === "Running" ? `agent-${agentIndex}.local:<port>` : "—";
+  for (const vm of agents) {
+    const isHosted = hosted && hosted.vmName === vm.name;
+    const stateStr = vm.state === "Running"
+      ? (isHosted ? chalk.green("Running ★") : chalk.green(vm.state))
+      : chalk.yellow(vm.state);
+    const ip = vm.state === "Running" ? (vm.ipv4 || "—") : "—";
     console.log(
-      `  ${vm.name.padEnd(40)} ${stateColor(vm.state.padEnd(12))} ${(devServer).padEnd(24)} ${branch}`
+      `  ${vm.name.padEnd(24)} ${stateStr.padEnd(12)} ${ip}`
     );
   }
+
+  if (hosted) {
+    console.log(chalk.cyan(`\n  ★ ${hosted.vmName} is hosted (localhost → ${hosted.vmIp})`));
+  }
+  console.log("");
 }
