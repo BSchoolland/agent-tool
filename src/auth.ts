@@ -76,18 +76,22 @@ function getGhAccounts(): GhAccount[] {
   return accounts;
 }
 
-async function mountClaudeDir(vmName: string): Promise<void> {
-  const claudeDir = join(homedir(), ".claude");
-  if (!existsSync(claudeDir)) return;
+async function mountDir(hostDir: string, vmName: string, vmDir: string): Promise<void> {
+  if (!existsSync(hostDir)) return;
 
   try {
-    await multipass.mount(claudeDir, vmName, "/home/ubuntu/.claude");
+    await multipass.mount(hostDir, vmName, vmDir);
   } catch (e: any) {
-    // Already mounted is fine
     if (!e.message.includes("already mounted")) {
-      console.log(chalk.yellow(`  Warning: could not mount ~/.claude: ${e.message}`));
+      console.log(chalk.yellow(`  Warning: could not mount ${hostDir}: ${e.message}`));
     }
   }
+}
+
+async function setupCodingTools(vmName: string): Promise<void> {
+  // Mount ~/.claude and ~/.codex into VMs for live-shared config, skills, and auth
+  await mountDir(join(homedir(), ".claude"), vmName, "/home/ubuntu/.claude");
+  await mountDir(join(homedir(), ".codex"), vmName, "/home/ubuntu/.codex");
 
   // Copy ~/.claude.json into the VM (can't mount a single file)
   const claudeJson = join(homedir(), ".claude.json");
@@ -165,5 +169,5 @@ async function setupSshKeys(vmName: string): Promise<void> {
 export async function mountAuth(vmName: string): Promise<void> {
   await setupGhAuth(vmName);
   await setupSshKeys(vmName);
-  await mountClaudeDir(vmName);
+  await setupCodingTools(vmName);
 }
