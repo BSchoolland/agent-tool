@@ -89,9 +89,11 @@ async function mountDir(hostDir: string, vmName: string, vmDir: string): Promise
 }
 
 async function setupCodingTools(vmName: string): Promise<void> {
-  // Mount ~/.claude and ~/.codex into VMs for live-shared config, skills, and auth
+  // Mount coding tool config dirs into VMs for live-shared config, skills, and auth
   await mountDir(join(homedir(), ".claude"), vmName, "/home/ubuntu/.claude");
   await mountDir(join(homedir(), ".codex"), vmName, "/home/ubuntu/.codex");
+  await mountDir(join(homedir(), ".config", "opencode"), vmName, "/home/ubuntu/.config/opencode");
+  await mountDir(join(homedir(), ".cache", "opencode"), vmName, "/home/ubuntu/.cache/opencode");
 
   // Copy ~/.claude.json into the VM (can't mount a single file)
   const claudeJson = join(homedir(), ".claude.json");
