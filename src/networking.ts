@@ -1,8 +1,13 @@
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdtempSync, rmdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { userInfo, tmpdir } from "node:os";
+import { join } from "node:path";
+import chalk from "chalk";
 import * as multipass from "./multipass.js";
 
 const STATE_FILE = "/tmp/agent-tool-hosted";
+const SUDOERS_FILE = "/etc/sudoers.d/agent-tool";
+const SUDOERS_CMDS = ["/usr/sbin/iptables", "/usr/sbin/ip6tables", "/usr/sbin/sysctl"];
 
 interface HostState {
   agentIndex: number;
@@ -29,6 +34,52 @@ function clearState(): void {
   } catch {
     // Already gone
   }
+}
+
+function hasSudoersRule(): boolean {
+  return existsSync(SUDOERS_FILE);
+}
+
+export function installSudoersRule(): void {
+  const user = userInfo().username;
+  const rule = `${user} ALL=(root) NOPASSWD: ${SUDOERS_CMDS.join(", ")}\n`;
+
+  // Write rule and install script to a unique temp dir
+  const tmpDir = mkdtempSync(join(tmpdir(), "agent-tool-"));
+  const tmpRule = join(tmpDir, "sudoers");
+  const tmpScript = join(tmpDir, "install.sh");
+  writeFileSync(tmpRule, rule, { mode: 0o644 });
+  writeFileSync(tmpScript, [
+    "#!/bin/sh",
+    `set -e`,
+    `cp "${tmpRule}" "${SUDOERS_FILE}"`,
+    `chmod 440 "${SUDOERS_FILE}"`,
+  ].join("\n"), { mode: 0o755 });
+
+  try {
+    // Validate syntax before installing (doesn't need root)
+    execFileSync("visudo", ["-cf", tmpRule], { stdio: "inherit" });
+    // Use pkexec for a graphical auth prompt that works without a TTY
+    execFileSync("pkexec", [tmpScript], { stdio: "inherit" });
+  } finally {
+    try { unlinkSync(tmpRule); } catch {}
+    try { unlinkSync(tmpScript); } catch {}
+    try { rmdirSync(tmpDir); } catch {}
+  }
+}
+
+export function ensureSudoers(): void {
+  if (hasSudoersRule()) return;
+
+  console.log(chalk.yellow(
+    "Hosting requires iptables/sysctl access. Installing a passwordless sudoers rule\n" +
+    "so future host/unhost operations won't prompt for a password.\n"
+  ));
+  console.log(chalk.dim(`  File: ${SUDOERS_FILE}`));
+  console.log(chalk.dim(`  Commands: ${SUDOERS_CMDS.join(", ")}\n`));
+
+  installSudoersRule();
+  console.log(chalk.green("Sudoers rule installed.\n"));
 }
 
 function sudo(args: string[]): void {
@@ -100,6 +151,8 @@ function removeIptablesRules(vmIp: string): void {
 }
 
 export async function hostAgent(vmName: string, agentIndex: number): Promise<void> {
+  ensureSudoers();
+
   // Tear down existing forwarding first
   await unhostAgent();
 

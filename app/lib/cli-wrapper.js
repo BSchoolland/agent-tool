@@ -42,11 +42,11 @@ async function stop(vmIndex) {
 }
 
 async function host(vmIndex) {
-  return exec('sudo', ['agent-tool', 'host', String(vmIndex)]);
+  return exec('agent-tool', ['host', String(vmIndex)]);
 }
 
 async function unhost() {
-  return exec('sudo', ['agent-tool', 'host']);
+  return exec('agent-tool', ['host']);
 }
 
 async function getHosted() {

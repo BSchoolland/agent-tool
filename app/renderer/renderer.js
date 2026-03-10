@@ -30,6 +30,12 @@ const vmState = {};
 // Map sessionId → { vmIndex, termIdx }
 const sessionMap = {};
 
+// ── Context menu helper ──
+function removeContextMenu() {
+  document.querySelectorAll('.xterm-context-menu').forEach(m => m.remove());
+}
+document.addEventListener('click', removeContextMenu);
+
 // ── DOM references ──
 const $tabbar = document.getElementById('tabbar');
 const $mainContent = document.getElementById('main-content');
@@ -373,39 +379,97 @@ async function addTerminal(vmIndex, opts = {}) {
   paneEl.className = 'term-pane';
 
   const xterm = new Terminal({
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 13,
-    lineHeight: 1.55,
+    // fontFamily: "'JetBrains Mono', monospace",
+    // fontSize: 13,
+    // lineHeight: 1.55,
     cursorBlink: true,
     cursorStyle: 'block',
-    theme: {
-      background: '#0c0c0e',
-      foreground: '#c8cad0',
-      cursor: '#c8cad0',
-      selectionBackground: '#2a2b35',
-      black: '#0a0a0b',
-      red: '#e55a5a',
-      green: '#3dd68c',
-      yellow: '#e5a64e',
-      blue: '#5b9bf5',
-      magenta: '#b48ead',
-      cyan: '#4ec9b0',
-      white: '#c8cad0',
-      brightBlack: '#44464f',
-      brightRed: '#e55a5a',
-      brightGreen: '#3dd68c',
-      brightYellow: '#e5a64e',
-      brightBlue: '#5b9bf5',
-      brightMagenta: '#b48ead',
-      brightCyan: '#4ec9b0',
-      brightWhite: '#c8cad0',
-    },
+    // theme: {
+    //   background: '#0c0c0e',
+    //   foreground: '#c8cad0',
+    //   cursor: '#c8cad0',
+    //   selectionBackground: '#2a2b35',
+    //   black: '#0a0a0b',
+    //   red: '#e55a5a',
+    //   green: '#3dd68c',
+    //   yellow: '#e5a64e',
+    //   blue: '#5b9bf5',
+    //   magenta: '#b48ead',
+    //   cyan: '#4ec9b0',
+    //   white: '#c8cad0',
+    //   brightBlack: '#44464f',
+    //   brightRed: '#e55a5a',
+    //   brightGreen: '#3dd68c',
+    //   brightYellow: '#e5a64e',
+    //   brightBlue: '#5b9bf5',
+    //   brightMagenta: '#b48ead',
+    //   brightCyan: '#4ec9b0',
+    //   brightWhite: '#c8cad0',
+    // },
   });
 
   const FitAddonClass = FitAddon.FitAddon;
   const fitAddon = new FitAddonClass();
   xterm.loadAddon(fitAddon);
   xterm.open(paneEl);
+
+  // Ctrl+Shift+C/V for copy/paste
+  let pasteHandledByKey = false;
+  xterm.attachCustomKeyEventHandler((e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'C' && e.type === 'keydown') {
+      const sel = xterm.getSelection();
+      if (sel) navigator.clipboard.writeText(sel);
+      return false;
+    }
+    if (e.ctrlKey && e.shiftKey && e.key === 'V' && e.type === 'keydown') {
+      pasteHandledByKey = true;
+      navigator.clipboard.readText().then(text => api.terminalWrite(sessionId, text));
+      return false;
+    }
+    return true;
+  });
+
+  // Suppress the browser paste event triggered by Ctrl+Shift+V to avoid double paste
+  paneEl.addEventListener('paste', (e) => {
+    if (pasteHandledByKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      pasteHandledByKey = false;
+    }
+  }, true);
+
+  // Right-click context menu
+  paneEl.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    removeContextMenu();
+    const sel = xterm.getSelection();
+    const menu = document.createElement('div');
+    menu.className = 'xterm-context-menu';
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+
+    if (sel) {
+      const copyItem = document.createElement('div');
+      copyItem.className = 'xterm-context-item';
+      copyItem.textContent = 'Copy';
+      copyItem.addEventListener('click', () => {
+        navigator.clipboard.writeText(sel);
+        removeContextMenu();
+      });
+      menu.appendChild(copyItem);
+    }
+
+    const pasteItem = document.createElement('div');
+    pasteItem.className = 'xterm-context-item';
+    pasteItem.textContent = 'Paste';
+    pasteItem.addEventListener('click', () => {
+      navigator.clipboard.readText().then(text => api.terminalWrite(sessionId, text));
+      removeContextMenu();
+    });
+    menu.appendChild(pasteItem);
+
+    document.body.appendChild(menu);
+  });
 
   // User keystrokes → PTY
   xterm.onData((data) => {
