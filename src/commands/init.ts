@@ -1,28 +1,50 @@
 import chalk from "chalk";
+import { checkbox } from "@inquirer/prompts";
 import { writeFileSync, rmSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
 import * as multipass from "../multipass.js";
-import { getBaseCloudInit } from "../cloud-init.js";
-import { getRepoName, projectVMName } from "../project.js";
+import { getBaseCloudInit, TOOLS } from "../cloud-init.js";
+import { vmName } from "../project.js";
 import { mountAuth } from "../auth.js";
 
 const BASE_VM_NAME = "agent-tool-base";
+
+async function selectTools(): Promise<string[]> {
+  return checkbox({
+    message: "Select tools to install in VMs (detected from host):",
+    pageSize: TOOLS.length,
+    choices: TOOLS.map((tool) => ({
+      name: tool.label,
+      value: tool.id,
+      checked: tool.detect(),
+    })),
+  });
+}
 
 async function ensureBaseImage(): Promise<void> {
   if (await multipass.exists(BASE_VM_NAME)) {
     return;
   }
 
+  const selectedTools = await selectTools();
+
+  if (selectedTools.length === 0) {
+    console.log(chalk.yellow("No tools selected — base VM will only have core packages.\n"));
+  } else {
+    const labels = selectedTools.map((id) => TOOLS.find((t) => t.id === id)!.label);
+    console.log(chalk.cyan(`\nInstalling: ${labels.join(", ")}\n`));
+  }
+
   console.log(
     chalk.yellow(
-      "First time setup detected — building base VM image. This takes ~10 minutes but only happens once.\n"
+      "Building base VM image. This takes ~10 minutes but only happens once.\n"
     )
   );
 
   // Write cloud-init to home dir (Multipass snap can't access /tmp or dotdirs)
   const cloudInitPath = join(homedir(), "agent-tool-cloud-init.yaml");
-  writeFileSync(cloudInitPath, getBaseCloudInit());
+  writeFileSync(cloudInitPath, getBaseCloudInit(selectedTools));
 
   console.log("Launching base VM...");
   try {
@@ -40,7 +62,10 @@ async function ensureBaseImage(): Promise<void> {
   console.log(chalk.green("VM launched.\n"));
 
   // Wait for cloud-init to finish, streaming its output log
-  console.log("Installing dev tools (Node, Bun, Python, Docker, Claude Code, gh)...\n");
+  const toolNames = selectedTools
+    .map((id) => TOOLS.find((t) => t.id === id)!.label)
+    .join(", ");
+  console.log(`Installing dev tools (${toolNames || "none"})...\n`);
   try {
     await multipass.streamCloudInitLog(BASE_VM_NAME);
   } catch (e: any) {
@@ -50,28 +75,27 @@ async function ensureBaseImage(): Promise<void> {
     console.log("Checking if tools were installed anyway...");
   }
 
-  // Verify key tools
-  console.log("\nVerifying installations...");
-  const ENV_SETUP = "source ~/.nvm/nvm.sh 2>/dev/null; export PATH=$HOME/.bun/bin:$PATH;";
-  const checks = [
-    { name: "node", cmd: "node --version" },
-    { name: "bun", cmd: "bun --version" },
-    { name: "python3", cmd: "python3 --version" },
-    { name: "gh", cmd: "gh --version" },
-    { name: "docker", cmd: "docker --version" },
-    { name: "claude", cmd: "claude --version" },
-  ];
+  // Verify selected tools
+  const checks = selectedTools
+    .map((id) => TOOLS.find((t) => t.id === id)!)
+    .filter((t) => t.verify)
+    .map((t) => t.verify!);
 
-  for (const check of checks) {
-    try {
-      const { stdout } = await multipass.runCommand(BASE_VM_NAME, [
-        "sudo", "-u", "ubuntu", "bash", "-c", `${ENV_SETUP} ${check.cmd}`,
-      ]);
-      console.log(chalk.green(`  ${check.name}: ${stdout.trim().split("\n")[0]}`));
-    } catch {
-      console.log(
-        chalk.yellow(`  ${check.name}: not found (may need manual install)`)
-      );
+  if (checks.length > 0) {
+    console.log("\nVerifying installations...");
+    const ENV_SETUP = "source ~/.nvm/nvm.sh 2>/dev/null; export PATH=$HOME/.bun/bin:$PATH;";
+
+    for (const check of checks) {
+      try {
+        const { stdout } = await multipass.runCommand(BASE_VM_NAME, [
+          "sudo", "-u", "ubuntu", "bash", "-c", `${ENV_SETUP} ${check.cmd}`,
+        ]);
+        console.log(chalk.green(`  ${check.name}: ${stdout.trim().split("\n")[0]}`));
+      } catch {
+        console.log(
+          chalk.yellow(`  ${check.name}: not found (may need manual install)`)
+        );
+      }
     }
   }
 
@@ -82,85 +106,75 @@ async function ensureBaseImage(): Promise<void> {
   console.log(chalk.green("Base image ready.\n"));
 }
 
-export async function init(): Promise<void> {
-  const project = getRepoName();
-  const vmName = projectVMName(project);
-  const projectDir = resolve(".");
+/** Find the next available VM index. */
+async function nextVMIndex(): Promise<number> {
+  const vms = await multipass.list();
+  const existing = vms
+    .filter((vm) => vm.name.startsWith("agent-tool-"))
+    .map((vm) => {
+      const match = vm.name.match(/^agent-tool-(\d+)$/);
+      return match ? parseInt(match[1], 10) : 0;
+    })
+    .filter((n) => n > 0);
 
-  console.log(chalk.bold(`Initializing project: ${project}\n`));
+  if (existing.length === 0) return 1;
+  return Math.max(...existing) + 1;
+}
+
+export async function init(countStr?: string): Promise<void> {
+  const count = countStr ? parseInt(countStr, 10) : 1;
+  if (isNaN(count) || count < 1) {
+    console.error(chalk.red("Count must be a positive number."));
+    process.exit(1);
+  }
 
   await multipass.checkMultipass();
   await ensureBaseImage();
 
-  // Check project VM doesn't already exist
-  if (await multipass.exists(vmName)) {
-    console.error(
-      chalk.red(
-        `Project VM "${vmName}" already exists. Delete it first with "multipass delete --purge ${vmName}" to re-init.`
-      )
-    );
-    process.exit(1);
-  }
+  const startIndex = await nextVMIndex();
 
-  // Clone base VM (retry on qemu-img timeout)
-  const MAX_CLONE_ATTEMPTS = 3;
-  for (let attempt = 1; attempt <= MAX_CLONE_ATTEMPTS; attempt++) {
-    console.log(`Cloning base VM for project...${attempt > 1 ? ` (attempt ${attempt}/${MAX_CLONE_ATTEMPTS})` : ""}`);
-    const cloneStart = Date.now();
-    const cloneTimer = setInterval(() => {
-      const elapsed = ((Date.now() - cloneStart) / 1000).toFixed(0);
-      process.stderr.write(`\r  ${elapsed}s elapsed...`);
-    }, 1000);
-    try {
-      await multipass.clone(BASE_VM_NAME, vmName);
-      clearInterval(cloneTimer);
-      process.stderr.write("\n");
-      console.log(chalk.green("Cloned."));
-      break;
-    } catch (e: any) {
-      clearInterval(cloneTimer);
-      process.stderr.write("\n");
-      if (attempt === MAX_CLONE_ATTEMPTS) {
-        console.error(chalk.red(`Clone failed after ${MAX_CLONE_ATTEMPTS} attempts: ${e.message}`));
-        process.exit(1);
+  console.log(chalk.bold(`Creating ${count} VM(s)...\n`));
+
+  for (let i = 0; i < count; i++) {
+    const index = startIndex + i;
+    const name = vmName(index);
+
+    // Clone base VM (retry on qemu-img timeout)
+    const MAX_CLONE_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_CLONE_ATTEMPTS; attempt++) {
+      console.log(`Cloning ${name}...${attempt > 1 ? ` (attempt ${attempt}/${MAX_CLONE_ATTEMPTS})` : ""}`);
+      const cloneStart = Date.now();
+      const cloneTimer = setInterval(() => {
+        const elapsed = ((Date.now() - cloneStart) / 1000).toFixed(0);
+        process.stderr.write(`\r  ${elapsed}s elapsed...`);
+      }, 1000);
+      try {
+        await multipass.clone(BASE_VM_NAME, name);
+        clearInterval(cloneTimer);
+        process.stderr.write("\n");
+        break;
+      } catch (e: any) {
+        clearInterval(cloneTimer);
+        process.stderr.write("\n");
+        if (attempt === MAX_CLONE_ATTEMPTS) {
+          console.error(chalk.red(`Clone failed after ${MAX_CLONE_ATTEMPTS} attempts: ${e.message}`));
+          process.exit(1);
+        }
+        console.log(chalk.yellow(`Clone failed (${e.message}), retrying...`));
+        try { await multipass.deleteVM(name); } catch {}
       }
-      console.log(chalk.yellow(`Clone failed (${e.message}), retrying...`));
-      // Clean up partial clone if it exists
-      try { await multipass.deleteVM(vmName); } catch {}
     }
+
+    // Start the VM
+    console.log(`Starting ${name}...`);
+    await multipass.start(name);
+    await mountAuth(name);
+    console.log(chalk.green(`  ${name}: ready`));
   }
 
-  // Start the cloned VM
-  console.log("Starting VM...");
-  await multipass.start(vmName);
-  console.log(chalk.green("Started.\n"));
-
-  // Copy project directory into VM
-  const vmProjectDir = `/home/ubuntu/${project}`;
-  console.log("Copying project files into VM...");
-  await multipass.transferTar(projectDir, vmName, vmProjectDir);
-  console.log(chalk.green("Files copied.\n"));
-
-  // Mount host auth into VM
-  await mountAuth(vmName);
-
-  // Drop user into shell at project root
-  console.log(
-    chalk.cyan("Dropping you into the VM. Do any VM-specific setup needed.")
-  );
-  console.log(chalk.cyan('Type "exit" when done to snapshot.\n'));
-
-  await multipass.runInteractive(vmName, [
-    "bash", "--login", "-c", `cd ${vmProjectDir} && exec bash`,
-  ]);
-
-  // Snapshot after user exits
-  console.log("\nStopping VM and creating project snapshot...");
-  await multipass.stop(vmName);
-  await multipass.snapshot(vmName, `${project}-ready`);
   console.log(
     chalk.bold.green(
-      `\nProject "${project}" is ready! Run "agent-tool start <N>" to boot agent VMs.`
+      `\n${count} VM(s) created (${vmName(startIndex)}${count > 1 ? ` – ${vmName(startIndex + count - 1)}` : ""}). Use "agent-tool setup <N>" to add a project.`
     )
   );
 }
