@@ -4,6 +4,7 @@ const cliWrapper = require('./lib/cli-wrapper');
 const terminalManager = require('./lib/terminal-manager');
 const statusPoller = require('./lib/status-poller');
 const projectManager = require('./lib/project-manager');
+const backend = require('./lib/backend');
 
 let mainWindow;
 
@@ -136,6 +137,24 @@ ipcMain.handle('project:setup', async (_, vmIndex, projectName) => {
   const projectPath = projectManager.getProjectPath(projectName);
   projectManager.setVmProject(vmIndex, projectName);
   return { projectPath, projectName };
+});
+
+// ── Backend IPC handlers ──
+
+ipcMain.handle('backend:get', () => {
+  return backend.getBackendName();
+});
+
+ipcMain.handle('backend:set', (_, name) => {
+  backend.setBackendName(name);
+});
+
+ipcMain.handle('backend:list', () => {
+  return Object.keys(backend.BACKENDS);
+});
+
+ipcMain.handle('backend:cliCmd', () => {
+  return backend.getBackend().cliCmd;
 });
 
 // ── App lifecycle ──

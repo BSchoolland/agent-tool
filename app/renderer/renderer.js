@@ -782,9 +782,10 @@ async function selectProject(vmIndex, projectName, projectPath) {
   // Run setup in a terminal pane
   renderContent(vmIndex);
 
-  // Spawn setup PTY: agent-tool setup <N> with cwd set to project path
+  // Spawn setup PTY with cwd set to project path
+  const cliCmd = await api.backendCliCmd();
   await addTerminal(vmIndex, {
-    command: ['agent-tool', 'setup', String(vmIndex)],
+    command: [cliCmd, 'setup', String(vmIndex)],
     cwd: projectPath,
     isSetup: true,
   });
@@ -947,6 +948,49 @@ resizeObserver.observe(document.querySelector('.app'));
 
 // ── Init ──
 async function init() {
+  // ── Backend selector ──
+  const $backendSelect = document.getElementById('statusbar-backend');
+  const backends = await api.backendList();
+  const currentBackend = await api.backendGet();
+  $backendSelect.innerHTML = '';
+  for (const name of backends) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === currentBackend) opt.selected = true;
+    $backendSelect.appendChild(opt);
+  }
+  $backendSelect.addEventListener('change', async () => {
+    await api.backendSet($backendSelect.value);
+    // Clear all terminals and re-init — backend changed
+    for (const idx in vmState) {
+      for (const t of vmState[idx].terminals) {
+        if (t.sessionId) api.terminalKill(t.sessionId);
+        if (t.xterm) t.xterm.dispose();
+      }
+    }
+    for (const key in vmState) delete vmState[key];
+    for (const key in sessionMap) delete sessionMap[key];
+    $mainContent.innerHTML = '';
+    activeTab = null;
+
+    // Re-load everything
+    projects = await api.projectList();
+    vms = await api.vmList();
+    for (const vm of vms) {
+      vmState[vm.index] = { terminals: [], activeTermIdx: -1, project: null, created: false };
+      const project = await api.projectGetVm(vm.index);
+      if (project) vmState[vm.index].project = project;
+    }
+    renderTabs();
+    for (const vm of vms) {
+      ensureContent(vm.index);
+      renderContent(vm.index);
+    }
+    if (vms.length > 0) switchTab(vms[0].index);
+    updateStatusBar();
+  });
+
   // Load projects
   projects = await api.projectList();
 

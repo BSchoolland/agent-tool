@@ -39,4 +39,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('status-update', (_, data) => callback(data));
   },
 
+  // Backend
+  backendGet: () => ipcRenderer.invoke('backend:get'),
+  backendSet: (name) => ipcRenderer.invoke('backend:set', name),
+  backendList: () => ipcRenderer.invoke('backend:list'),
+  backendCliCmd: () => ipcRenderer.invoke('backend:cliCmd'),
+
 });

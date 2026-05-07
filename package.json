@@ -4,11 +4,14 @@
   "description": "Run multiple AI coding agents in parallel using isolated Multipass VMs",
   "type": "module",
   "bin": {
-    "agent-tool": "./dist/cli.js"
+    "agent-tool": "./dist/cli.js",
+    "agent-tool-docker": "./dist-docker/cli.js"
   },
   "scripts": {
     "build": "bun build src/cli.ts --outdir dist --target node",
+    "build:docker": "bun build src-docker/cli.ts --outdir dist-docker --target node",
     "dev": "bun run src/cli.ts --",
+    "dev:docker": "bun run src-docker/cli.ts --",
     "start": "bun dist/cli.js"
   },
   "keywords": [

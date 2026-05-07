@@ -1,5 +1,6 @@
 const pty = require('node-pty');
 const crypto = require('crypto');
+const { getBackend } = require('./backend');
 
 const sessions = new Map();
 
@@ -11,13 +12,11 @@ function createSession(vmIndex, onData, opts = {}) {
   if (opts.command) {
     cmd = opts.command[0];
     cmdArgs = opts.command.slice(1);
-  } else if (opts.project) {
-    cmd = 'multipass';
-    cmdArgs = ['exec', vmName, '--', 'bash', '--login', '-c',
-      `cd /home/ubuntu/${opts.project} && exec bash --login`];
   } else {
-    cmd = 'multipass';
-    cmdArgs = ['exec', vmName, '--', 'bash', '--login'];
+    const backend = getBackend();
+    const terminal = backend.terminalArgs(vmName, opts.project);
+    cmd = terminal.cmd;
+    cmdArgs = terminal.args;
   }
 
   const proc = pty.spawn(cmd, cmdArgs, {

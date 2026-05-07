@@ -1,6 +1,7 @@
 const { execFile } = require('child_process');
 const { readFile, stat } = require('fs/promises');
 const { join } = require('path');
+const { getBackend } = require('./backend');
 
 function exec(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
@@ -15,43 +16,58 @@ function exec(cmd, args, opts = {}) {
   });
 }
 
+async function getDockerIP(vmName) {
+  try {
+    const { stdout } = await exec('docker', [
+      'inspect', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', vmName,
+    ]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 async function list() {
-  const { stdout } = await exec('multipass', ['list', '--format', 'json']);
-  const data = JSON.parse(stdout);
-  const vms = (data.list || [])
-    .filter(vm => /^agent-tool-\d+$/.test(vm.name))
-    .map(vm => {
-      const match = vm.name.match(/agent-tool-(\d+)/);
-      return {
-        name: vm.name,
-        index: match ? parseInt(match[1], 10) : 0,
-        state: vm.state,
-        ipv4: vm.ipv4 && vm.ipv4.length > 0 ? vm.ipv4[0] : null,
-      };
-    })
-    .sort((a, b) => a.index - b.index);
+  const backend = getBackend();
+  const { stdout } = await exec(backend.execCmd, backend.listArgs);
+  const vms = backend.parseList(stdout);
+
+  // Docker needs a separate inspect call for IPs
+  if (backend === require('./backend').BACKENDS.docker) {
+    await Promise.all(
+      vms.filter(vm => vm.state === 'Running').map(async (vm) => {
+        vm.ipv4 = await getDockerIP(vm.name);
+      })
+    );
+  }
+
   return vms;
 }
 
 async function start(vmIndex) {
-  return exec('agent-tool', ['start', String(vmIndex)]);
+  const backend = getBackend();
+  return exec(backend.cliCmd, ['start', String(vmIndex)]);
 }
 
 async function stop(vmIndex) {
-  return exec('agent-tool', ['stop', String(vmIndex)]);
+  const backend = getBackend();
+  return exec(backend.cliCmd, ['stop', String(vmIndex)]);
 }
 
 async function host(vmIndex) {
-  return exec('agent-tool', ['host', String(vmIndex)]);
+  const backend = getBackend();
+  return exec(backend.cliCmd, ['host', String(vmIndex)]);
 }
 
 async function unhost() {
-  return exec('agent-tool', ['host']);
+  const backend = getBackend();
+  return exec(backend.cliCmd, ['host']);
 }
 
 async function getHosted() {
+  const backend = getBackend();
   try {
-    const data = await readFile('/tmp/agent-tool-hosted', 'utf-8');
+    const data = await readFile(backend.stateFile, 'utf-8');
     return JSON.parse(data);
   } catch {
     return null;
@@ -59,11 +75,12 @@ async function getHosted() {
 }
 
 async function getBranch(vmIndex, project) {
+  const backend = getBackend();
   const vmName = `agent-tool-${vmIndex}`;
   try {
-    const { stdout } = await exec('multipass', [
-      'exec', vmName, '--', 'git', '-C', `/home/ubuntu/${project}`, 'branch', '--show-current',
-    ]);
+    const { stdout } = await exec(backend.execCmd,
+      backend.execArgs(vmName, ['git', '-C', `/home/ubuntu/${project}`, 'branch', '--show-current'])
+    );
     return stdout.trim();
   } catch {
     return null;
@@ -99,7 +116,8 @@ async function computeSize(dirPath) {
 }
 
 async function syncPush(vmIndex, localPath, cwd) {
-  return exec('agent-tool', ['sync-push', String(vmIndex), localPath], { cwd });
+  const backend = getBackend();
+  return exec(backend.cliCmd, ['sync-push', String(vmIndex), localPath], { cwd });
 }
 
 module.exports = { list, start, stop, host, unhost, getHosted, getBranch, computeSize, syncPush };
